@@ -1,0 +1,4 @@
+/* 入力ソース一覧 (システム設定 › キーボード › 入力ソース、メニューバー) の表示名。
+   キーは入力モード ID (TISInputSourceID)。値が表示名になる。 */
+"dev.vimeu.inputmethod.VimeuIME" = "Vimeu";
+"dev.vimeu.inputmethod.VimeuIME.Japanese" = "Vimeu";

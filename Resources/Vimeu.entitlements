@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- A sandboxed input method loses direct access to its own preferences
+         domain; both exceptions below are needed to read and write it. -->
+    <key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+    <array>
+        <string>/Library/Preferences/dev.vimeu.inputmethod.VimeuIME.plist</string>
+    </array>
+    <key>com.apple.security.temporary-exception.shared-preference.read-only</key>
+    <string>dev.vimeu.inputmethod.VimeuIME</string>
+
+    <!-- IMKServer registers this Mach service name; without the exception the
+         registration is denied under the sandbox and the IME never appears. -->
+    <key>com.apple.security.temporary-exception.mach-register.global-name</key>
+    <string>dev.vimeu.inputmethod.VimeuIME_Connection</string>
+
+    <!-- The user dictionary (v2) lives in the app container; no other file
+         access is required. The system dictionary is read from inside the
+         bundle, which needs no entitlement. -->
+</dict>
+</plist>

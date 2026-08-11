@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>dev.vimeu.inputmethod.VimeuIME</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>VimeuIME</string>
+    <key>CFBundleDisplayName</key>
+    <string>Vimeu</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>VimeuIME</string>
+    <!-- An agent: no Dock icon, no menu bar of its own, but it can show a window
+         and take key focus — which the tuning window needs. LSBackgroundOnly is
+         deliberately absent: it is the stricter flag and bars the process from
+         coming to the foreground at all, so the tuning window could be ordered
+         front but never typed into. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <!-- Must be exactly "<bundle identifier>_Connection". Any other value makes
+         the NSConnection registration fail once the app is sandboxed and the IME
+         never loads (macOS 10.7+ convention; Apple's own sample is out of date). -->
+    <key>InputMethodConnectionName</key>
+    <string>dev.vimeu.inputmethod.VimeuIME_Connection</string>
+    <key>InputMethodServerControllerClass</key>
+    <string>VimeuInputController</string>
+
+    <!-- UIDesignRequiresCompatibility is deliberately absent.
+         It opts the process back into the macOS 15 rendering path, which the
+         2026 input-method guidelines suggest as a way to avoid LiquidGlass's
+         memory overhead. It also makes every control render in the old design,
+         which is why the tuning window looked nothing like a current macOS
+         window while the development harness — a plain binary with no
+         Info.plist, and so on the current path — looked right.
+         Measured on this app the saving is a couple of MB against a ~35 MB
+         process and a 1 GB watchdog, so it buys nothing worth an out-of-date
+         window. -->
+
+    <key>ComponentInputModeDict</key>
+    <dict>
+        <key>tsInputModeListKey</key>
+        <dict>
+            <key>dev.vimeu.inputmethod.VimeuIME.Japanese</key>
+            <dict>
+                <key>TISInputSourceID</key>
+                <string>dev.vimeu.inputmethod.VimeuIME.Japanese</string>
+                <key>TISIntendedLanguage</key>
+                <string>ja</string>
+                <key>tsInputModeDefaultStateKey</key>
+                <true/>
+                <key>tsInputModeIsVisibleKey</key>
+                <true/>
+                <key>tsInputModePrimaryInScriptKey</key>
+                <true/>
+                <key>tsInputModeScriptKey</key>
+                <string>smJapanese</string>
+                <key>tsInputModeMenuIconFileKey</key>
+                <string>MenuIcon.tiff</string>
+                <key>tsInputModePaletteIconFileKey</key>
+                <string>MenuIcon.tiff</string>
+            </dict>
+        </dict>
+        <key>tsVisibleInputModeOrderedArrayKey</key>
+        <array>
+            <string>dev.vimeu.inputmethod.VimeuIME.Japanese</string>
+        </array>
+    </dict>
+</dict>
+</plist>

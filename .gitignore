@@ -1,0 +1,15 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcodeproj
+
+# Built app bundle
+VimeuIME.app/
+
+# Dictionary data: large, and deterministically regenerable from Mozc's src/data.
+dict/mozc/
+dict/*.dic
+
+# Corpora used only for accuracy regression.
+corpus/*.txt
+corpus/*.jsonl

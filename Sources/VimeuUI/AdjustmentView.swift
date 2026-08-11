@@ -531,11 +531,15 @@ private struct KnobActions: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            Button { onBoost(-1) } label: { Image(systemName: "minus") }
-                .help("弱める（コストを上げる）")
+            // Arrows, not ± — the user is moving a word up or down the
+            // candidate list, and 強める *lowers* the number, so a plus sign
+            // sits on the button that makes the cost go down. Up and down carry
+            // the meaning without ever pointing at the number's direction.
+            Button { onBoost(1) } label: { Image(systemName: "arrow.up") }
+                .help("強める（順位を上げる。コストは下がる）")
                 .disabled(deleted)
-            Button { onBoost(1) } label: { Image(systemName: "plus") }
-                .help("強める（コストを下げる）")
+            Button { onBoost(-1) } label: { Image(systemName: "arrow.down") }
+                .help("弱める（順位を下げる。コストは上がる）")
                 .disabled(deleted)
             if deleted {
                 Button { onRevive() } label: { Image(systemName: "eye") }

@@ -60,6 +60,15 @@ public enum UserDict {
     public static let collocationBonus: Int32 = 3453
     public static var collocationWindow: Int32 { collocationBonus }
 
+    /// What a *disabled* connection costs: the top of the range, which is also
+    /// Mozc's `kMaxCost` and the cost of the pass-through kana node.
+    ///
+    /// Not infinity. A forbidden transition still has to be traversable, because
+    /// the lattice must span the whole input even when every path through it is
+    /// one the user asked not to see — the same reason Mozc gives its unknown
+    /// nodes a finite cost rather than dropping them.
+    public static var forbiddenConnectionCost: Int32 { costRange.upperBound }
+
     public static func now() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 }
 
@@ -145,5 +154,73 @@ public struct WordKey: Hashable, Sendable {
     public init(reading: String, surface: String) {
         self.reading = reading
         self.surface = surface
+    }
+}
+
+/// A user edit to one cell of Mozc's connection matrix — 左の品詞 → 右の品詞.
+///
+/// The third kind of edit, and the sharpest. A `WordEdit` moves one entry, so it
+/// only ever changes sentences that entry appears in. This moves a *POS pair*,
+/// so it changes every sentence in the language that crosses that boundary. That
+/// is not a defect to be fixed — a transition is a property of the grammar, not
+/// of a word — but it is why the tuning window states the scope on the pane and
+/// why DESIGN.md §4.2 asks for the effect to be measured (`vimeu-eval --user`)
+/// rather than judged from one sentence.
+///
+/// `cost == nil` with `disabled == true` is "この接続を使わない"; the effective
+/// value becomes `UserDict.forbiddenConnectionCost`, and the row stays so it can
+/// be undone. A cost with `disabled == false` is a plain override. Both are
+/// absolute: 強める / 弱める resolve against the value in force at the time of
+/// the press, exactly as `WordEdit` does, so rebuilding `vimeu.dic` cannot move
+/// an edit the user tuned by eye.
+public struct ConnectionEdit: Sendable, Equatable {
+    /// `id.def` feature string of the left word's **rid** — `BOS/EOS,*,*,*,*,*,*`
+    /// at the start of a sentence.
+    public var left: String
+    /// `id.def` feature string of the right word's **lid**, `BOS/EOS,…` at the end.
+    public var right: String
+    public var cost: Int32?
+    public var disabled: Bool
+    public var updatedAt: Int64
+
+    public init(
+        left: String, right: String, cost: Int32?, disabled: Bool,
+        updatedAt: Int64 = UserDict.now()
+    ) {
+        self.left = left
+        self.right = right
+        self.cost = cost.map(UserDict.clampCost)
+        self.disabled = disabled
+        self.updatedAt = updatedAt
+    }
+
+    public var key: ConnectionKey { ConnectionKey(left: left, right: right) }
+
+    /// The value conversion should use, or nil when the row says nothing.
+    public var effectiveCost: Int32? {
+        if disabled { return UserDict.forbiddenConnectionCost }
+        return cost
+    }
+}
+
+/// Ordered, and keyed by POS **feature string** rather than by the numeric id
+/// the matrix is indexed with.
+///
+/// The ids are `id.def` line numbers. They are stable within one Mozc data drop
+/// and not across two: a POS inserted upstream renumbers everything after it,
+/// and an edit stored as `1583 → 261` would then silently apply to a different
+/// pair of parts of speech — the one failure mode a user could never diagnose.
+/// The names are the same thing the 接続 pane shows, so what is in the file is
+/// what was on screen. Resolving them back to ids is `OverlaidDictionary`'s job
+/// and happens against whichever dictionary is loaded; a name that no longer
+/// exists drops out of the effective table and stays in the file, exactly as a
+/// word edit for a reading the dictionary no longer has does.
+public struct ConnectionKey: Hashable, Sendable {
+    public var left: String
+    public var right: String
+
+    public init(left: String, right: String) {
+        self.left = left
+        self.right = right
     }
 }

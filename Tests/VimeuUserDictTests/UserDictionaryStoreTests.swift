@@ -64,7 +64,38 @@ final class UserDictionaryStoreTests: XCTestCase {
 
     /// Words and pairs live in separate files, and saving one must not disturb
     /// the other — they are written by different actions in the UI.
-    func testWordsAndCollocationsAreIndependent() throws {
+    func testConnectionRoundTrip() throws {
+        let bos = "BOS/EOS,*,*,*,*,*,*"
+        let verb = "動詞,自立,*,*,五段・ワ行促音便,連用形,*"
+        let particle = "助詞,格助詞,一般,*,*,*,*"
+        try store.saveConnections([
+            ConnectionKey(left: bos, right: verb): ConnectionEdit(
+                left: bos, right: verb, cost: 2632, disabled: false, updatedAt: 111
+            ),
+            ConnectionKey(left: particle, right: verb): ConnectionEdit(
+                left: particle, right: verb, cost: nil, disabled: true, updatedAt: 222
+            ),
+        ])
+
+        let loaded = try store.load().connections
+        XCTAssertEqual(loaded.count, 2)
+        // POS features contain commas and full-width middle dots; the file is
+        // tab-separated, so neither needs escaping and neither may be mangled.
+        let start = loaded[ConnectionKey(left: bos, right: verb)]
+        XCTAssertEqual(start?.cost, 2632)
+        XCTAssertEqual(start?.right, verb)
+        XCTAssertEqual(start?.updatedAt, 111)
+
+        // A hide-only edit carries no cost of its own, and reads as the ceiling.
+        let forbidden = loaded[ConnectionKey(left: particle, right: verb)]
+        XCTAssertNil(forbidden?.cost ?? nil)
+        XCTAssertEqual(forbidden?.disabled, true)
+        XCTAssertEqual(forbidden?.effectiveCost, UserDict.forbiddenConnectionCost)
+    }
+
+    /// Three kinds of edit, three files. Saving one must never disturb another —
+    /// each `save*` rewrites its own file whole.
+    func testTheThreeKindsOfEditAreIndependent() throws {
         try store.saveWords([
             WordKey(reading: "はし", surface: "橋"): WordEdit(
                 reading: "はし", surface: "橋", cost: 1500, disabled: false, updatedAt: 1
@@ -75,10 +106,18 @@ final class UserDictionaryStoreTests: XCTestCase {
                 left: "皮", right: "剥く", updatedAt: 2
             )
         ])
+        try store.saveConnections([
+            ConnectionKey(left: "BOS/EOS,*,*,*,*,*,*", right: "名詞,一般,*,*,*,*,*"):
+                ConnectionEdit(
+                    left: "BOS/EOS,*,*,*,*,*,*", right: "名詞,一般,*,*,*,*,*",
+                    cost: 1500, disabled: false, updatedAt: 3
+                )
+        ])
 
         let loaded = try store.load()
         XCTAssertEqual(loaded.words.count, 1)
         XCTAssertEqual(loaded.collocations.count, 1)
+        XCTAssertEqual(loaded.connections.count, 1)
     }
 
     /// The core is the authority on ranges; the UI may soft-limit but cannot

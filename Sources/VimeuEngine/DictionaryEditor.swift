@@ -22,6 +22,37 @@ public struct WordKnob: Sendable, Identifiable, Equatable {
     public var id: String { reading + "\t" + surface }
 }
 
+/// One row of the tuning UI's connection list: a transition of the selected
+/// candidate, plus whether the user has moved it.
+///
+/// Identified by position in the path, not by the POS pair, because a candidate
+/// can cross the same pair twice (`… の … の …`) and the pane lists the path in
+/// order. The two rows then edit the same cell and move together, which is the
+/// truth of what a connection edit does.
+public struct ConnectionKnob: Sendable, Identifiable, Equatable {
+    /// Index of the boundary in the candidate, 0 being the BOS transition.
+    public let index: Int
+    /// Surface of the left word, nil at the sentence start.
+    public let left: String?
+    /// Surface of the right word, nil at the sentence end.
+    public let right: String?
+    /// The ids the cell is addressed by: `left.rid` and `right.lid`, 0 for BOS/EOS.
+    public let rid: Int
+    public let lid: Int
+    public let leftPOS: String
+    public let rightPOS: String
+    /// The cost conversion is using right now. **Lower is more likely.**
+    public let cost: Int32
+    /// What Mozc's matrix says.
+    public let baseCost: Int32
+    public let userOverride: Bool
+    /// The user asked for this transition not to be used — cost is pinned at
+    /// `UserDict.forbiddenConnectionCost` and 復活 undoes it.
+    public let disabled: Bool
+
+    public var id: Int { index }
+}
+
 /// Owns the user's dictionary: applies edits, persists them, and hands out the
 /// effective dictionary to convert with.
 ///
@@ -178,6 +209,101 @@ public final class DictionaryEditor: @unchecked Sendable {
         return choices
     }
 
+    // MARK: - Connection edits
+
+    /// Override one cell of the connection matrix.
+    ///
+    /// Takes POS **ids** because that is what the caller has — they come off the
+    /// lattice nodes of the candidate being explained — and stores names, because
+    /// that is what survives a dictionary rebuild (see `ConnectionKey`).
+    public func setConnectionCost(rid: Int, lid: Int, cost: Int32) {
+        let key = dictionary.connectionKey(rid, lid)
+        mutateConnections { connections in
+            connections[key] = ConnectionEdit(
+                left: key.left, right: key.right,
+                cost: cost, disabled: false
+            )
+        }
+    }
+
+    /// 強める / 弱める for a transition. Same sign convention and same ∓500 step
+    /// as `boostWord`: `steps > 0` means "more likely", so the cost goes down.
+    ///
+    /// Resolved against the value in force now and stored absolute, so the edit
+    /// does not drift when `vimeu.dic` is rebuilt.
+    public func boostConnection(rid: Int, lid: Int, steps: Int) {
+        let current = dictionary.transitionCost(rid, lid)
+        setConnectionCost(
+            rid: rid, lid: lid,
+            cost: UserDict.clampCost(current - Int32(steps) * UserDict.costStep)
+        )
+    }
+
+    /// "この接続を使わない" — the transition keeps a finite cost
+    /// (`UserDict.forbiddenConnectionCost`) so the lattice still spans the input;
+    /// it just loses to anything else. Reversible, like hiding a word.
+    ///
+    /// Any cost the user had set is kept, so 復活 lands back on it rather than on
+    /// Mozc's value.
+    public func disableConnection(rid: Int, lid: Int) {
+        let key = dictionary.connectionKey(rid, lid)
+        mutateConnections { connections in
+            connections[key] = ConnectionEdit(
+                left: key.left, right: key.right,
+                cost: connections[key]?.cost, disabled: true
+            )
+        }
+    }
+
+    public func reviveConnection(rid: Int, lid: Int) {
+        let key = dictionary.connectionKey(rid, lid)
+        mutateConnections { connections in
+            guard let existing = connections[key] else { return }
+            guard let cost = existing.cost else {
+                connections[key] = nil
+                return
+            }
+            connections[key] = ConnectionEdit(
+                left: key.left, right: key.right, cost: cost, disabled: false
+            )
+        }
+    }
+
+    /// Back to Mozc's own value for this cell.
+    public func resetConnection(rid: Int, lid: Int) {
+        let key = dictionary.connectionKey(rid, lid)
+        mutateConnections { $0[key] = nil }
+    }
+
+    public var connectionEdits: [ConnectionEdit] { dictionary.allConnectionEdits }
+
+    /// The connection rows for one candidate: its transitions in path order,
+    /// BOS first and EOS last.
+    ///
+    /// Only the selected candidate's, unlike the word list which pools every
+    /// candidate. A transition is a fact about one path — the same POS pair in
+    /// another candidate is a different boundary between different words — and
+    /// the pane exists to say why *this* candidate scored what it did.
+    public func connectionKnobs(for candidate: Candidate) -> [ConnectionKnob] {
+        let overlay = dictionary
+        return candidate.boundaries.map { boundary in
+            let edit = overlay.connectionEdit(boundary.rid, boundary.lid)
+            return ConnectionKnob(
+                index: boundary.index,
+                left: boundary.left?.surface,
+                right: boundary.right?.surface,
+                rid: boundary.rid,
+                lid: boundary.lid,
+                leftPOS: overlay.posName(boundary.rid),
+                rightPOS: overlay.posName(boundary.lid),
+                cost: boundary.cost,
+                baseCost: overlay.systemTransitionCost(boundary.rid, boundary.lid),
+                userOverride: edit?.cost != nil,
+                disabled: edit?.disabled ?? false
+            )
+        }
+    }
+
     private func effectiveWordCost(reading: String, surface: String) -> Int32? {
         dictionary.effectiveCost(reading: reading, surface: surface)
             ?? dictionary.wordEdit(reading: reading, surface: surface)?.cost
@@ -246,6 +372,15 @@ public final class DictionaryEditor: @unchecked Sendable {
         overlay = OverlaidDictionary(system: system, edits: snapshot)
         lock.unlock()
         record { try store.saveCollocations(pairs) }
+    }
+
+    private func mutateConnections(_ body: (inout [ConnectionKey: ConnectionEdit]) -> Void) {
+        lock.lock()
+        body(&snapshot.connections)
+        let connections = snapshot.connections
+        overlay = OverlaidDictionary(system: system, edits: snapshot)
+        lock.unlock()
+        record { try store.saveConnections(connections) }
     }
 
     private func record(_ work: () throws -> Void) {

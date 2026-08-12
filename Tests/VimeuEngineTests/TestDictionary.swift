@@ -32,16 +32,38 @@ enum TestDictionary {
         /* サ変    */ 500, 1000, 1000, 1000, 1000,
     ]
 
+    /// The same table with two POS ids swapped, and the connection matrix
+    /// permuted to match, so every transition keeps the cost it had under its
+    /// *name*.
+    ///
+    /// This is what a Mozc data drop that inserts a POS looks like from the
+    /// outside: identical grammar, different line numbers. Connection edits are
+    /// keyed by name precisely so they survive it.
+    static func permutingPOS(_ a: Int, _ b: Int) -> (names: [String], connection: [Int16]) {
+        var names = posNames
+        names.swapAt(a, b)
+        func old(_ id: Int) -> Int { id == a ? b : (id == b ? a : id) }
+        var permuted = [Int16](repeating: 0, count: posCount * posCount)
+        for rid in 0..<posCount {
+            for lid in 0..<posCount {
+                permuted[rid * posCount + lid] = connection[old(rid) * posCount + old(lid)]
+            }
+        }
+        return (names, permuted)
+    }
+
     static func write(
         to path: String,
         words: [(reading: String, surface: String, cost: Int32, lid: Int, rid: Int)],
+        posNames: [String]? = nil,
+        connection: [Int16]? = nil,
         prefixPenalty: [UInt16]? = nil,
         suffixPenalty: [UInt16]? = nil
     ) throws -> DicReader {
         let writer = DicWriter()
         try writer.setPOSTable(
-            names: posNames,
-            connection: connection,
+            names: posNames ?? Self.posNames,
+            connection: connection ?? Self.connection,
             prefixPenalty: prefixPenalty ?? [UInt16](repeating: 0, count: posCount),
             suffixPenalty: suffixPenalty ?? [UInt16](repeating: 0, count: posCount),
             unknownPOSID: unknownPOSID

@@ -205,7 +205,8 @@ let info = converter.statistics
 print("""
 dictionary   \(dicPath) (\(info.readings) readings, \(info.tokens) tokens, \
 \(info.posCount) POS ids)
-user dict    \(flags["user"] ?? "(none)") (\(info.userWordEdits) word edits)
+user dict    \(flags["user"] ?? "(none)") (\(info.userWordEdits) word edits, \
+\(info.userConnectionEdits) connection edits)
 testset      \(testsetPath)
 
 sentences    \(metrics.sentences)

@@ -352,15 +352,21 @@ public struct AdjustmentView: View {
 
     // MARK: - Connections
 
-    /// Why the selected candidate won.
+    /// Why the selected candidate won — and, since the edits landed, where to
+    /// change it.
     ///
-    /// Read-only for now. The costs here are per *POS pair*, so an edit would
-    /// apply to every sentence in the language, not just this one — a much
-    /// sharper tool than the word list and one that needs its consequences shown
-    /// before it can be offered. See DESIGN.md §4.2.
+    /// The controls are deliberately the same five as the word list: the user
+    /// already knows 強める / 弱める / 数値 / 使わない / リセット, and a transition
+    /// is one more number in the same units. What is *not* the same is the reach.
+    /// A word edit touches the sentences that word appears in; this touches every
+    /// sentence in the language that crosses this pair of parts of speech, and
+    /// this window can only ever show one of them. That is what the footer says,
+    /// and why DESIGN.md §4.2 points at `vimeu-eval --user` — the effect on the
+    /// other 13,804 sentences is measurable, just not from here.
     private var connectionsTab: some View {
-        VStack(spacing: 0) {
-            if model.boundaries.isEmpty {
+        let connections = model.connections
+        return VStack(spacing: 0) {
+            if connections.isEmpty {
                 ContentUnavailableView(
                     "接続はありません",
                     systemImage: "arrow.left.arrow.right",
@@ -368,48 +374,69 @@ public struct AdjustmentView: View {
                                       + "かかったコストがここに並びます。")
                 )
             } else {
-                Table(model.boundaries) {
-                    TableColumn("左") { boundary in
+                Table(connections) {
+                    TableColumn("左") { knob in
                         boundarySide(
-                            surface: boundary.left?.surface ?? "BOS",
-                            posID: boundary.rid,
-                            isTerminal: boundary.left == nil
+                            surface: knob.left ?? "BOS",
+                            pos: knob.leftPOS,
+                            isTerminal: knob.left == nil,
+                            disabled: knob.disabled
                         )
                     }
                     TableColumn("") { _ in
                         Image(systemName: "arrow.right").foregroundStyle(.tertiary)
                     }
                     .width(20)
-                    TableColumn("右") { boundary in
+                    TableColumn("右") { knob in
                         boundarySide(
-                            surface: boundary.right?.surface ?? "EOS",
-                            posID: boundary.lid,
-                            isTerminal: boundary.right == nil
+                            surface: knob.right ?? "EOS",
+                            pos: knob.rightPOS,
+                            isTerminal: knob.right == nil,
+                            disabled: knob.disabled
                         )
                     }
-                    TableColumn("接続コスト") { boundary in
-                        Text("\(boundary.cost)")
-                            .monospacedDigit()
-                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    TableColumn("接続コスト") { knob in
+                        CostField(
+                            value: knob.cost,
+                            base: knob.userOverride || knob.disabled ? knob.baseCost : nil,
+                            onSet: { model.setConnectionCost(knob, to: $0) }
+                        )
                     }
-                    .width(min: 80, ideal: 90)
+                    .width(min: 120, ideal: 128)
+                    TableColumn("") { knob in
+                        KnobActions(
+                            deleted: knob.disabled,
+                            canReset: knob.userOverride || knob.disabled,
+                            onBoost: { model.boostConnection(knob, steps: $0) },
+                            onDelete: { model.disableConnection(knob) },
+                            onRevive: { model.reviveConnection(knob) },
+                            onReset: { model.resetConnection(knob) }
+                        )
+                    }
+                    .width(min: 132, ideal: 140)
                 }
             }
             Spacer(minLength: 0)
-            ConnectionFooter(total: model.boundaries.reduce(0) { $0 + $1.cost })
+            ConnectionFooter(
+                total: connections.reduce(0) { $0 + $1.cost },
+                editCount: model.connectionEditCount
+            )
         }
     }
 
-    private func boundarySide(surface: String, posID: Int, isTerminal: Bool) -> some View {
+    private func boundarySide(
+        surface: String, pos: String, isTerminal: Bool, disabled: Bool
+    ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(surface)
-                .foregroundStyle(isTerminal ? .secondary : .primary)
-            Text(Self.shortPOS(model.posName(posID)))
+                .strikethrough(disabled)
+                .foregroundStyle(isTerminal || disabled ? .secondary : .primary)
+            Text(Self.shortPOS(pos))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .help(model.posName(posID))
+        .help(pos)
     }
 }
 
@@ -455,16 +482,30 @@ private struct CollocationFooter: View {
     }
 }
 
+/// The connection pane's footer.
+///
+/// The warning is not decoration. Everywhere else in this window an edit is
+/// visible in the candidate list above it, and that list is the whole truth of
+/// what changed. Here it is not: the row moved a rule of the grammar, and the
+/// sentences it also moved are not on screen. Saying so — and naming the tool
+/// that can show them — is the only thing the window can honestly do.
 private struct ConnectionFooter: View {
     let total: Int32
+    /// How many cells the user has moved in all, not just in this sentence.
+    let editCount: Int
 
     var body: some View {
         Divider()
         HStack(alignment: .firstTextBaseline) {
-            Text("品詞と品詞のつながりにかかるコストです。Mozc の接続表そのままで、編集はできません。")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("品詞と品詞のつながりにかかるコストです。この編集は品詞の組そのものに"
+                     + "効くので、いま見えている文だけでなく、同じ組を通るすべての文が動きます。")
+                Text("影響は vimeu-eval --user をテストセットに掛けて、編集前と比べてください。"
+                     + (editCount > 0 ? "　編集済み \(editCount) 組" : ""))
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 12)
             Text("合計 \(total)")
                 .font(.callout)

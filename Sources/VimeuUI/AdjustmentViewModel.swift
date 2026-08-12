@@ -62,16 +62,14 @@ public final class AdjustmentViewModel: ObservableObject {
         return repeated
     }
 
-    /// The boundaries of the selected candidate — the whole content of the
-    /// 接続 pane.
-    public var boundaries: [Boundary] {
-        guard candidates.indices.contains(selectedCandidate) else { return [] }
-        return candidates[selectedCandidate].boundaries
-    }
-
-    /// `id.def`'s feature string for a POS id, or a BOS/EOS marker at the ends.
-    public func posName(_ id: Int) -> String {
-        editor?.dictionary.posName(id) ?? "?"
+    /// The transitions of the selected candidate — the whole content of the
+    /// 接続 pane, each with the edit state of the matrix cell behind it.
+    ///
+    /// Computed rather than published: it depends on `selectedCandidate`, which
+    /// changes without a re-convert, and a candidate has a handful of boundaries.
+    public var connections: [ConnectionKnob] {
+        guard let editor, candidates.indices.contains(selectedCandidate) else { return [] }
+        return editor.connectionKnobs(for: candidates[selectedCandidate])
     }
 
     public func show(reading: String?) {
@@ -96,9 +94,19 @@ public final class AdjustmentViewModel: ObservableObject {
             collocationChoices = []
             return
         }
+        // Which candidate the 接続 pane is explaining has to survive the
+        // re-convert, and an edit is *meant* to move candidates around — holding
+        // the index would leave the pane pointing at whatever landed in that row,
+        // which is the candidate the user just demoted. Follow the text instead.
+        let wasSelected = candidates.indices.contains(selectedCandidate)
+            ? candidates[selectedCandidate].text : nil
         let converter = Converter(dictionary: editor.dictionary)
         candidates = converter.convert(reading: reading, limit: 9)
-        if !candidates.indices.contains(selectedCandidate) { selectedCandidate = 0 }
+        if let wasSelected, let moved = candidates.firstIndex(where: { $0.text == wasSelected }) {
+            selectedCandidate = moved
+        } else if !candidates.indices.contains(selectedCandidate) {
+            selectedCandidate = 0
+        }
         // Cheapest first: the entries most likely to be responsible for a
         // conversion are the ones worth looking at.
         words = editor.wordKnobs(for: candidates, reading: reading)
@@ -148,6 +156,43 @@ public final class AdjustmentViewModel: ObservableObject {
         guard !reading.isEmpty, !surface.isEmpty else { return }
         editor?.setWordCost(reading: reading, surface: surface, cost: cost)
         reconvert()
+    }
+
+    // MARK: - Connection actions
+
+    /// The same five gestures as the word list, on a cell of the connection
+    /// matrix. What differs is the reach, not the mechanics — see the pane's
+    /// footer and DESIGN.md §4.2.
+    public func setConnectionCost(_ knob: ConnectionKnob, to cost: Int32) {
+        editor?.setConnectionCost(rid: knob.rid, lid: knob.lid, cost: cost)
+        reconvert()
+    }
+
+    public func boostConnection(_ knob: ConnectionKnob, steps: Int) {
+        editor?.boostConnection(rid: knob.rid, lid: knob.lid, steps: steps)
+        reconvert()
+    }
+
+    public func disableConnection(_ knob: ConnectionKnob) {
+        editor?.disableConnection(rid: knob.rid, lid: knob.lid)
+        reconvert()
+    }
+
+    public func reviveConnection(_ knob: ConnectionKnob) {
+        editor?.reviveConnection(rid: knob.rid, lid: knob.lid)
+        reconvert()
+    }
+
+    public func resetConnection(_ knob: ConnectionKnob) {
+        editor?.resetConnection(rid: knob.rid, lid: knob.lid)
+        reconvert()
+    }
+
+    /// How many cells the user has moved, for the pane's footer. A count is the
+    /// only honest global statement this window can make about connection edits:
+    /// it cannot show what they did to the rest of the language.
+    public var connectionEditCount: Int {
+        editor?.dictionary.statistics.userConnectionEdits ?? 0
     }
 
     // MARK: - Collocation actions

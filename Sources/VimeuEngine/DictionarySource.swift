@@ -60,12 +60,20 @@ public struct DictionaryStatistics: Sendable {
     public var posCount: Int
     /// Non-zero only when a user dictionary is layered on top.
     public var userWordEdits: Int
+    /// Connection-matrix cells the user has overridden. Worth reporting
+    /// separately from the word edits because one of these is a change to the
+    /// grammar, not to a word — see `ConnectionEdit`.
+    public var userConnectionEdits: Int
 
-    public init(readings: Int, tokens: Int, posCount: Int, userWordEdits: Int = 0) {
+    public init(
+        readings: Int, tokens: Int, posCount: Int,
+        userWordEdits: Int = 0, userConnectionEdits: Int = 0
+    ) {
         self.readings = readings
         self.tokens = tokens
         self.posCount = posCount
         self.userWordEdits = userWordEdits
+        self.userConnectionEdits = userConnectionEdits
     }
 }
 

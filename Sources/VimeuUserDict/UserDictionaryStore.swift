@@ -17,22 +17,28 @@ public final class UserDictionaryStore: @unchecked Sendable {
     public struct Snapshot: Sendable {
         public var words: [WordKey: WordEdit]
         public var collocations: [CollocationKey: CollocationEdit]
+        public var connections: [ConnectionKey: ConnectionEdit]
 
         public init(
             words: [WordKey: WordEdit] = [:],
-            collocations: [CollocationKey: CollocationEdit] = [:]
+            collocations: [CollocationKey: CollocationEdit] = [:],
+            connections: [ConnectionKey: ConnectionEdit] = [:]
         ) {
             self.words = words
             self.collocations = collocations
+            self.connections = connections
         }
 
-        public var isEmpty: Bool { words.isEmpty && collocations.isEmpty }
+        public var isEmpty: Bool {
+            words.isEmpty && collocations.isEmpty && connections.isEmpty
+        }
     }
 
     public let directory: URL
 
     private let wordHeader = "reading\tsurface\tcost\tdisabled\tupdated_at"
     private let collocationHeader = "left\tright\tupdated_at"
+    private let connectionHeader = "left_pos\tright_pos\tcost\tdisabled\tupdated_at"
 
     public init(directory: URL) {
         self.directory = directory
@@ -47,6 +53,7 @@ public final class UserDictionaryStore: @unchecked Sendable {
 
     private var wordURL: URL { directory.appendingPathComponent("user_word.tsv") }
     private var collocationURL: URL { directory.appendingPathComponent("user_collocation.tsv") }
+    private var connectionURL: URL { directory.appendingPathComponent("user_connection.tsv") }
 
     // MARK: - Load
 
@@ -77,6 +84,22 @@ public final class UserDictionaryStore: @unchecked Sendable {
             )
             guard !edit.left.isEmpty, !edit.right.isEmpty else { continue }
             snapshot.collocations[edit.key] = edit
+        }
+
+        for fields in try rows(of: connectionURL) {
+            guard fields.count >= 4 else { continue }
+            let edit = ConnectionEdit(
+                left: fields[0],
+                right: fields[1],
+                cost: parseOptionalCost(fields[2]),
+                disabled: fields[3] == "1",
+                updatedAt: fields.count > 4 ? (Int64(fields[4]) ?? 0) : 0
+            )
+            // A row with neither a cost nor the hidden flag has nothing to say;
+            // dropping it here keeps `OverlaidDictionary` from having to.
+            guard !edit.left.isEmpty, !edit.right.isEmpty,
+                  edit.effectiveCost != nil else { continue }
+            snapshot.connections[edit.key] = edit
         }
 
         return snapshot
@@ -124,6 +147,20 @@ public final class UserDictionaryStore: @unchecked Sendable {
             out += "\(e.left)\t\(e.right)\t\(e.updatedAt)\n"
         }
         try writeAtomically(out, to: collocationURL)
+    }
+
+    public func saveConnections(_ connections: [ConnectionKey: ConnectionEdit]) throws {
+        let sorted = connections.values.sorted {
+            $0.left != $1.left
+                ? UserDict.utf8Less($0.left, $1.left)
+                : UserDict.utf8Less($0.right, $1.right)
+        }
+        var out = connectionHeader + "\n"
+        for e in sorted {
+            let cost = e.cost.map(String.init) ?? ""
+            out += "\(e.left)\t\(e.right)\t\(cost)\t\(e.disabled ? 1 : 0)\t\(e.updatedAt)\n"
+        }
+        try writeAtomically(out, to: connectionURL)
     }
 
     /// Write through a temporary file in the same directory and `rename` over

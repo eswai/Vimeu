@@ -534,11 +534,14 @@ Mozc の値のまま — `ConnectionTests.testAnEditTouchesExactlyOneCell` が�
 - `setMarkedText` と `insertText` はブロッキングで、**MainActor 上で同期的に**呼ぶ必要がある
 - `IMKCandidates` は使わない。自前の `NSPanel`（候補）と `NSWindow`（調整）の **2 枚だけ**を
   遅延生成して使い回す。macOS 26 は NSWindow のメモリを回収しないため、開くたびに作らない
-- **`LSBackgroundOnly` は設定しない**。`LSUIElement` だけにする。前者はより強い指定で、
+- **`LSBackgroundOnly` は設定しない**。通常時は `LSUIElement` だけにする。前者はより強い指定で、
   プロセスが前面に来ること自体を禁じるため、調整ウィンドウを前面に出せてもキー入力を
   受け取れない。加えて、このプロセスは自前のメニューバーを持たないので ⌘V などが
   フィールドエディタへ配送されない。`AdjustmentWindowController` がローカルイベントモニタで
-  レスポンダチェーンへ手動転送している
+  レスポンダチェーンへ手動転送している。調整ウィンドウを開いている間だけ
+  `setActivationPolicy(.regular)` で通常アプリに切り替える。この間はバンドルのアイコンが
+  Dock に現れ、Dock から調整ウィンドウを選択・再前面化できる。ウィンドウを閉じた時点で
+  `.accessory` に戻し、入力メソッド単体では Dock を占有しない
 - `activateServer` のたびに自プロセスのフットプリントを確認し、1024MB を超えたら通知して終了する
 - **`UIDesignRequiresCompatibility` は設定しない**。指針は LiquidGlass のメモリ増を避ける
   手段としてこれを挙げているが、実体は **macOS 15 の描画パスへ戻すキー**で、全コントロールが

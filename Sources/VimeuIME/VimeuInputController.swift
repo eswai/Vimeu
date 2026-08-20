@@ -56,6 +56,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     private static let punctuation: [Character: String] = [
         ",": "、",
         ".": "。",
+        "/": "・",
     ]
 
     /// One panel for the whole process, shared by every controller instance

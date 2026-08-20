@@ -77,7 +77,7 @@ assemble:
 	# edits to Info.plist would silently never reach the built app.
 	cp $(RES_DIR)/Info.plist        $(CONTENTS)/Info.plist
 	cp $(RES_DIR)/PkgInfo           $(CONTENTS)/PkgInfo
-	cp $(RES_DIR)/InfoPlist.strings $(RES_DIR)/MenuIcon.tiff $(RESOURCES)/
+	cp $(RES_DIR)/InfoPlist.strings $(RES_DIR)/MenuIcon.tiff $(RES_DIR)/AppIcon.icns $(RESOURCES)/
 
 sign:
 	@echo "==> Signing $(APP_BUNDLE)$(if $(ENTITLEMENTS), (sandboxed),)"

@@ -19,6 +19,9 @@
     <string>APPL</string>
     <key>CFBundleExecutable</key>
     <string>VimeuIME</string>
+    <!-- Regenerate with: swift Resources/make-app-icon.swift -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <!-- An agent: no Dock icon, no menu bar of its own, but it can show a window
          and take key focus — which the tuning window needs. LSBackgroundOnly is
          deliberately absent: it is the stricter flag and bars the process from

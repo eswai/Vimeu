@@ -15,6 +15,11 @@ import Foundation
 /// segment machinery — `structure_cost`, the candidate filter, the boundary
 /// checks — left out, since vimeu has no bunsetsu to expose.
 public enum NBest {
+    /// Safety valve shared by callers that want every candidate the search can
+    /// practically enumerate. A dense lattice can contain exponentially many
+    /// paths, so "all" means every distinct surface found before this guard.
+    public static let maxExpansions = 20_000
+
     /// One completed path: node indices left to right, and its total cost.
     public struct Path: Sendable {
         public let nodes: [Int]
@@ -65,7 +70,7 @@ public enum NBest {
         dictionary: DictionarySource,
         limit: Int,
         extension extra: Extension? = nil,
-        maxExpansions: Int = 20_000
+        maxExpansions: Int = Self.maxExpansions
     ) -> [Path] {
         guard lattice.length > 0, viterbi.bestFinalNode != nil else { return [] }
 

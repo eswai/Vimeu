@@ -88,7 +88,8 @@ public final class CandidatePanel {
     }
 
     private func fitToContent() {
-        let height = CGFloat(viewModel.candidates.count) * Self.rowHeight + Self.padding * 2
+        let visibleCount = min(viewModel.candidates.count, CandidateViewModel.pageSize)
+        let height = CGFloat(visibleCount) * Self.rowHeight + Self.padding * 2
         var frame = panel.frame
         frame.size = CGSize(width: contentWidth(), height: height)
         panel.setFrame(frame, display: true)

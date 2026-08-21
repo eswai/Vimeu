@@ -13,8 +13,8 @@ public struct CandidateView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(model.candidates.enumerated()), id: \.offset) { index, text in
-                candidateRow(index: index, text: text)
+            ForEach(model.visibleIndices, id: \.self) { index in
+                candidateRow(index: index, text: model.candidates[index])
             }
         }
         .padding(4)

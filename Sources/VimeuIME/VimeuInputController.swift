@@ -49,8 +49,11 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         return c
     }()
 
-    /// How many whole-sentence candidates the panel offers.
-    private static let candidateLimit = 9
+    /// Ask for every candidate the n-best search can enumerate. The search has
+    /// its own expansion safety valve because the number of lattice paths can
+    /// be exponential; using the same value here removes the former UI-only
+    /// nine-candidate truncation without weakening that guard.
+    private static let candidateLimit = NBest.maxExpansions
 
     /// ASCII punctuation typed directly maps to Japanese punctuation.
     private static let punctuation: [Character: String] = [

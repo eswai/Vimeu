@@ -74,5 +74,6 @@ let package = Package(
         .testTarget(name: "VimeuEngineTests", dependencies: ["VimeuEngine"]),
         .testTarget(name: "VimeuUserDictTests", dependencies: ["VimeuUserDict"]),
         .testTarget(name: "VimeuInputTests", dependencies: ["VimeuInput"]),
+        .testTarget(name: "VimeuUITests", dependencies: ["VimeuUI"]),
     ]
 )

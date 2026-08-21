@@ -101,7 +101,11 @@ public final class AdjustmentViewModel: ObservableObject {
         let wasSelected = candidates.indices.contains(selectedCandidate)
             ? candidates[selectedCandidate].text : nil
         let converter = Converter(dictionary: editor.dictionary)
-        candidates = converter.convert(reading: reading, limit: 9)
+        // The word and collocation panes pool entries from every candidate.
+        // Truncating this conversion would make valid dictionary entries
+        // impossible to inspect or edit merely because their sentence ranked
+        // below the visible top rows.
+        candidates = converter.convert(reading: reading, limit: NBest.maxExpansions)
         if let wasSelected, let moved = candidates.firstIndex(where: { $0.text == wasSelected }) {
             selectedCandidate = moved
         } else if !candidates.indices.contains(selectedCandidate) {

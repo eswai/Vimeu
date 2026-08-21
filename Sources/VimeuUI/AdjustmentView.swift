@@ -83,10 +83,17 @@ public struct AdjustmentView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
+                    let showsCollocationCost = model.candidates.contains {
+                        $0.collocationCost != 0
+                    }
                     ScrollView(.vertical) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(model.candidates.enumerated()), id: \.offset) { index, candidate in
-                                candidateRow(index: index, candidate: candidate)
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(model.candidates.indices, id: \.self) { index in
+                                candidateRow(
+                                    index: index,
+                                    candidate: model.candidates[index],
+                                    showsCollocationCost: showsCollocationCost
+                                )
                             }
                         }
                     }
@@ -108,7 +115,11 @@ public struct AdjustmentView: View {
     ///
     /// Selecting a row is what the 接続 pane explains, so the whole row is a
     /// button rather than the tap target being some small affordance.
-    private func candidateRow(index: Int, candidate: Candidate) -> some View {
+    private func candidateRow(
+        index: Int,
+        candidate: Candidate,
+        showsCollocationCost: Bool
+    ) -> some View {
         Button {
             model.selectedCandidate = index
         } label: {
@@ -140,16 +151,10 @@ public struct AdjustmentView: View {
                 ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.25)
                 : Color.clear
         )
-        .help(costTooltip(for: candidate))
+        .help(costTooltip(for: candidate, showsCollocationCost: showsCollocationCost))
     }
 
-    /// True as soon as any candidate has a collocation credit — the column is
-    /// shown or hidden for the whole list at once, so the rows stay aligned.
-    private var showsCollocationCost: Bool {
-        model.candidates.contains { $0.collocationCost != 0 }
-    }
-
-    private func costTooltip(for candidate: Candidate) -> String {
+    private func costTooltip(for candidate: Candidate, showsCollocationCost: Bool) -> String {
         var text = "合計 \(candidate.cost) ＝ 単語 \(candidate.wordCost)"
             + " ＋ 接続 \(candidate.connectionCost)"
         if showsCollocationCost {

@@ -284,11 +284,23 @@ public struct AdjustmentView: View {
                 ContentUnavailableView(
                     "共起はありません",
                     systemImage: "link",
-                    description: Text("一緒に選ばれてほしい2語を上で登録すると、"
-                                      + "その組を満たす候補が上位に来ます。")
+                    description: Text("正の共起は一緒に選ばれるようにし、"
+                                      + "負の共起は同じ候補から除外します。")
                 )
             } else {
                 Table(model.collocations) {
+                    TableColumn("種類") { pair in
+                        Label(
+                            pair.polarity.title,
+                            systemImage: pair.polarity == .positive
+                                ? "link" : "nosign"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(
+                            pair.polarity == .positive ? Color.primary : Color.orange
+                        )
+                    }
+                    .width(min: 90, ideal: 100)
                     TableColumn("左") { pair in Text(pair.left) }
                     TableColumn("") { _ in
                         Image(systemName: "arrow.right").foregroundStyle(.tertiary)
@@ -298,8 +310,13 @@ public struct AdjustmentView: View {
                     // The list outlives any one sentence, so most rows have
                     // nothing to do with what is on screen. This column is what
                     // ties the two together.
-                    TableColumn("この文") { pair in
-                        if model.isActive(pair) {
+                    TableColumn("状態") { pair in
+                        if pair.polarity == .negative {
+                            Label("候補から除外", systemImage: "nosign")
+                                .labelStyle(.titleAndIcon)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        } else if model.isActive(pair) {
                             Label("有効", systemImage: "checkmark.circle.fill")
                                 .labelStyle(.titleAndIcon)
                                 .font(.caption)
@@ -330,8 +347,20 @@ public struct AdjustmentView: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             } else {
+                Picker("種類", selection: $model.collocationPolarity) {
+                    ForEach(CollocationPolarity.allCases, id: \.self) { polarity in
+                        Text(polarity.title).tag(polarity)
+                    }
+                }
+                .frame(minWidth: 100)
                 wordMenu(selection: $model.collocationLeft)
-                Image(systemName: "arrow.right").foregroundStyle(.tertiary)
+                Image(
+                    systemName: model.collocationPolarity == .positive
+                        ? "arrow.right" : "nosign"
+                )
+                .foregroundStyle(
+                    model.collocationPolarity == .positive ? Color.secondary : Color.orange
+                )
                 wordMenu(selection: $model.collocationRight)
                 Spacer(minLength: 12)
                 Button("組を追加", systemImage: "plus") { model.addCollocation() }
@@ -474,9 +503,9 @@ private struct CollocationFooter: View {
 
     var body: some View {
         Divider()
-        Text("登録した組を満たす候補は、合計コストから \(bonus) 引かれます。"
-             + "効くのは上位候補どうしの差を埋める範囲だけで、"
-             + "大きく負けている候補は繰り上がりません。")
+        Text("正の共起を満たす候補は、合計コストから \(bonus) 引かれます。"
+             + "負の共起を含む候補は、コストに関係なく除外されます。"
+             + "どちらも自立語どうしで、負の共起は語順を問いません。")
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)

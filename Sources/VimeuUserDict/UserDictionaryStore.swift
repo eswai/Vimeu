@@ -37,7 +37,7 @@ public final class UserDictionaryStore: @unchecked Sendable {
     public let directory: URL
 
     private let wordHeader = "reading\tsurface\tcost\tdisabled\tupdated_at"
-    private let collocationHeader = "left\tright\tupdated_at"
+    private let collocationHeader = "left\tright\tpolarity\tupdated_at"
     private let connectionHeader = "left_pos\tright_pos\tcost\tdisabled\tupdated_at"
 
     public init(directory: URL) {
@@ -77,10 +77,24 @@ public final class UserDictionaryStore: @unchecked Sendable {
 
         for fields in try rows(of: collocationURL) {
             guard fields.count >= 2 else { continue }
+            // The original format had three columns and therefore implied a
+            // positive relation. Keep reading it so upgrading vimeu does not
+            // discard a user's existing pair table.
+            let polarity: CollocationPolarity
+            let updatedAt: Int64
+            if fields.count >= 4 {
+                guard let parsed = CollocationPolarity(rawValue: fields[2]) else { continue }
+                polarity = parsed
+                updatedAt = Int64(fields[3]) ?? 0
+            } else {
+                polarity = .positive
+                updatedAt = fields.count > 2 ? (Int64(fields[2]) ?? 0) : 0
+            }
             let edit = CollocationEdit(
                 left: fields[0],
                 right: fields[1],
-                updatedAt: fields.count > 2 ? (Int64(fields[2]) ?? 0) : 0
+                polarity: polarity,
+                updatedAt: updatedAt
             )
             guard !edit.left.isEmpty, !edit.right.isEmpty else { continue }
             snapshot.collocations[edit.key] = edit
@@ -144,7 +158,7 @@ public final class UserDictionaryStore: @unchecked Sendable {
         }
         var out = collocationHeader + "\n"
         for e in sorted {
-            out += "\(e.left)\t\(e.right)\t\(e.updatedAt)\n"
+            out += "\(e.left)\t\(e.right)\t\(e.polarity.rawValue)\t\(e.updatedAt)\n"
         }
         try writeAtomically(out, to: collocationURL)
     }

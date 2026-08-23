@@ -72,14 +72,34 @@ public enum UserDict {
     public static func now() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 }
 
-/// A pair of words the user wants to see chosen together — 皮 と 剥く.
+/// The direction of a user-defined word relationship.
 ///
-/// This is the co-occurrence counterpart of `WordEdit`: the dictionary knows
+/// Positive relations are ordered and give a matching candidate a bounded
+/// credit. Negative relations mean that the two words must not occur together;
+/// they are therefore matched in either order and are enforced as a hard
+/// candidate filter by the engine.
+public enum CollocationPolarity: String, CaseIterable, Sendable {
+    case positive
+    case negative
+
+    public var title: String {
+        switch self {
+        case .positive: return "正の共起"
+        case .negative: return "負の共起"
+        }
+    }
+}
+
+/// A user-defined relation between two words — 皮 と 剥く.
+///
+/// For a positive relation, this is the co-occurrence counterpart of `WordEdit`: the dictionary knows
 /// what `かわ` and `むく` can mean, and the connection matrix knows that
 /// 名詞 → 助詞 → 動詞 is a sentence, but neither has any way to prefer 皮を剥く
 /// over 川を向く — every reading here shares the same POS sequence, so the
 /// connection cost is identical for all of them. The only thing that separates
 /// them is which words actually occur together, and that is what this records.
+/// A negative relation instead records that the two surfaces must not occur in
+/// one candidate; it is unordered and enforced as a hard filter.
 ///
 /// Deliberately not a corpus statistic. A hand-written pair can only fail to
 /// fire; a mined one can also fire where it should not, and the user has no way
@@ -87,13 +107,19 @@ public enum UserDict {
 public struct CollocationEdit: Sendable, Equatable, Identifiable {
     public var left: String
     public var right: String
+    public var polarity: CollocationPolarity
     public var updatedAt: Int64
 
     public var id: String { left + "\t" + right }
 
-    public init(left: String, right: String, updatedAt: Int64 = UserDict.now()) {
+    public init(
+        left: String, right: String,
+        polarity: CollocationPolarity = .positive,
+        updatedAt: Int64 = UserDict.now()
+    ) {
         self.left = left
         self.right = right
+        self.polarity = polarity
         self.updatedAt = updatedAt
     }
 
@@ -110,6 +136,20 @@ public struct CollocationKey: Hashable, Sendable {
     public init(left: String, right: String) {
         self.left = left
         self.right = right
+    }
+
+    /// A stable, unordered spelling for a negative relation.
+    ///
+    /// Positive relations keep their direction. Negative relations describe
+    /// mutual exclusion, so `A`/`B` and `B`/`A` are the same relationship.
+    public static func unordered(_ left: String, _ right: String) -> CollocationKey {
+        UserDict.utf8Less(left, right)
+            ? CollocationKey(left: left, right: right)
+            : CollocationKey(left: right, right: left)
+    }
+
+    public func isUnorderedMatch(_ other: CollocationKey) -> Bool {
+        self == other || (left == other.right && right == other.left)
     }
 }
 

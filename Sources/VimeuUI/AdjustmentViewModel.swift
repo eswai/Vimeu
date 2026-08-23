@@ -32,6 +32,7 @@ public final class AdjustmentViewModel: ObservableObject {
     /// Registered word pairs, and the menus for adding one.
     @Published public private(set) var collocations: [CollocationEdit] = []
     @Published public private(set) var collocationChoices: [String] = []
+    @Published public var collocationPolarity: CollocationPolarity = .positive
     @Published public var collocationLeft: String = ""
     @Published public var collocationRight: String = ""
 
@@ -211,7 +212,10 @@ public final class AdjustmentViewModel: ObservableObject {
 
     public func addCollocation() {
         guard canAddCollocation else { return }
-        editor?.addCollocation(left: collocationLeft, right: collocationRight)
+        editor?.addCollocation(
+            left: collocationLeft, right: collocationRight,
+            polarity: collocationPolarity
+        )
         reconvert()
     }
 
@@ -226,6 +230,7 @@ public final class AdjustmentViewModel: ObservableObject {
     /// have nothing to do with the sentence on screen. Marking the ones that do
     /// is what connects this pane back to the candidate list above it.
     public func isActive(_ edit: CollocationEdit) -> Bool {
-        candidates.contains { $0.collocations.contains(edit.key) }
+        guard edit.polarity == .positive else { return false }
+        return candidates.contains { $0.collocations.contains(edit.key) }
     }
 }

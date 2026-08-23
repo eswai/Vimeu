@@ -49,10 +49,18 @@ public enum NBest {
         public var limit: Int
         /// Paths past `limit` are kept only while they cost no more than this.
         public var ceiling: Int32
+        /// Optional hard-path predicate. Rejected paths do not count toward
+        /// `limit`, which lets a caller skip forbidden candidates and continue
+        /// searching for the next valid surface.
+        public var acceptsPath: (@Sendable ([Int]) -> Bool)?
 
-        public init(limit: Int, ceiling: Int32) {
+        public init(
+            limit: Int, ceiling: Int32,
+            acceptsPath: (@Sendable ([Int]) -> Bool)? = nil
+        ) {
             self.limit = limit
             self.ceiling = ceiling
+            self.acceptsPath = acceptsPath
         }
     }
 
@@ -111,6 +119,9 @@ public enum NBest {
                 let nodes = unwind(elements, from: elementIndex)
                 var text = ""
                 for i in nodes { text += lattice.nodes[i].surface }
+                if let acceptsPath = extra?.acceptsPath, !acceptsPath(nodes) {
+                    continue
+                }
                 if seen.insert(text).inserted {
                     paths.append(Path(nodes: nodes, cost: element.f))
                     if paths.count >= hardLimit { break }

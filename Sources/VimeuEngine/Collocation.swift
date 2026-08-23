@@ -12,18 +12,18 @@ import VimeuUserDict
 ///
 /// So this is a third term, and it is kept deliberately small:
 ///
-/// - It is a **boolean**, not a score. A pair is registered or it is not; there
-///   is no weight to tune, no threshold, and no coefficient — which is what lets
-///   §1.1's "no free parameters" survive the addition.
+/// - A positive pair is a **boolean**, not a score. A pair is registered or it
+///   is not; there is no weight to tune, no threshold, and no coefficient —
+///   which is what lets §1.1's "no free parameters" survive the addition.
 /// - It is applied by **re-ranking the n-best**, not inside the Viterbi. The
 ///   words of a collocation are not adjacent (`皮 を 剥く`), so scoring them in
 ///   the lattice would mean carrying the previous content word in the search
 ///   state, which breaks both the Markov property the decoder rests on and the
 ///   admissibility of the A\* heuristic in §3.3. Re-ranking a finished list
 ///   leaves the decoder exactly as it was.
-/// - It is **bounded** by `UserDict.collocationWindow`, the same window Mozc's
-///   own `CollocationRewriter` uses. It reorders candidates that were already
-///   close; it cannot resurrect one the language model ruled out.
+/// - Positive pairs are **bounded** by `UserDict.collocationWindow`, the same
+///   window Mozc's own `CollocationRewriter` uses. A negative pair is different:
+///   it is a hard, unordered exclusion and is applied before positive ranking.
 public enum Collocation {
     /// Which words of a path can take part in a pair.
     ///
@@ -37,7 +37,7 @@ public enum Collocation {
     /// Judged from the `id.def` feature string, so it follows whatever POS the
     /// packed dictionary was built with rather than a hardcoded id table.
     public static func isContentWord(posName: String) -> Bool {
-        var parts = posName.split(separator: ",", omittingEmptySubsequences: false)
+        let parts = posName.split(separator: ",", omittingEmptySubsequences: false)
         guard !parts.isEmpty else { return false }
         let major = parts[0]
         // Particles and auxiliaries attach to the word before them; symbols and
@@ -83,6 +83,43 @@ public enum Collocation {
         }
     }
 
+    /// Whether a candidate contains a mutually exclusive pair.
+    ///
+    /// Negative relations are unordered: the user is saying that the two words
+    /// must never appear in the same converted sentence, regardless of which
+    /// word comes first or which intermediate nodes were selected.
+    public static func containsNegativePair(
+        in segments: [Segment], table: Set<CollocationKey>,
+        dictionary: DictionarySource
+    ) -> Bool {
+        _ = dictionary // Kept in the API alongside `pairs` for caller symmetry.
+        return containsNegativePair(
+            in: segments.map(\.surface), table: table
+        )
+    }
+
+    /// Negative relations are about simultaneous appearance, not a particular
+    /// segmentation. Check every pair of surfaces in the completed candidate,
+    /// including a passthrough node that may have inherited an unknown POS.
+    public static func containsNegativePair(
+        in surfaces: [String], table: Set<CollocationKey>
+    ) -> Bool {
+        guard !table.isEmpty else { return false }
+        for leftIndex in surfaces.indices {
+            for rightIndex in surfaces.indices where rightIndex > leftIndex {
+                let pair = CollocationKey(
+                    left: surfaces[leftIndex], right: surfaces[rightIndex]
+                )
+                if table.contains(pair) || table.contains(
+                    CollocationKey(left: pair.right, right: pair.left)
+                ) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     /// Re-rank candidates by the registered pairs, cheapest first.
     ///
     /// Every candidate within `collocationWindow` of the best one is credited
@@ -96,12 +133,15 @@ public enum Collocation {
     /// weight is needed.
     static func rerank(
         _ candidates: [Candidate], pairs table: Set<CollocationKey>,
-        dictionary: DictionarySource
+        negativePairs: Set<CollocationKey> = [], dictionary: DictionarySource
     ) -> [Candidate] {
-        guard !table.isEmpty, let best = candidates.first?.cost else { return candidates }
+        let allowed = candidates.filter {
+            !containsNegativePair(in: $0.segments, table: negativePairs, dictionary: dictionary)
+        }
+        guard !table.isEmpty, let best = allowed.first?.cost else { return allowed }
         let ceiling = best + UserDict.collocationWindow
 
-        let scored = candidates.map { candidate -> Candidate in
+        let scored = allowed.map { candidate -> Candidate in
             guard candidate.cost <= ceiling else { return candidate }
             let matched = pairs(of: candidate.segments, dictionary: dictionary)
                 .filter(table.contains)

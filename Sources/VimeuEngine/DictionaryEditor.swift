@@ -161,30 +161,70 @@ public final class DictionaryEditor: @unchecked Sendable {
 
     // MARK: - Collocation edits
 
-    /// Register "these two words go together".
+    /// Register a relation between two words.
     ///
-    /// No cost to choose: a pair is worth `UserDict.collocationBonus` or it is
-    /// not registered. Re-adding an existing pair only refreshes its timestamp,
-    /// which moves it to the top of the list — the same thing the user would
-    /// mean by adding it twice.
-    public func addCollocation(left: String, right: String) {
+    /// A positive pair is directional and worth `UserDict.collocationBonus`; a
+    /// negative pair is unordered and excludes candidates containing both
+    /// words. Re-adding an existing relation refreshes its timestamp, which
+    /// moves it to the top of the list.
+    public func addCollocation(
+        left: String, right: String, polarity: CollocationPolarity = .positive
+    ) {
         let left = left.trimmingCharacters(in: .whitespaces)
         let right = right.trimmingCharacters(in: .whitespaces)
         guard !left.isEmpty, !right.isEmpty else { return }
         mutateCollocations { pairs in
-            let edit = CollocationEdit(left: left, right: right)
+            // A negative relation is mutual exclusion, so store it in a stable
+            // order and prevent the same two words from being both positive and
+            // negative at once. A new explicit relation replaces the old one.
+            let storedKey = polarity == .negative
+                ? CollocationKey.unordered(left, right)
+                : CollocationKey(left: left, right: right)
+            for (key, existing) in pairs where
+                existing.polarity != polarity &&
+                (key.isUnorderedMatch(storedKey) || storedKey.isUnorderedMatch(key)) {
+                pairs[key] = nil
+            }
+            let edit = CollocationEdit(
+                left: storedKey.left, right: storedKey.right, polarity: polarity
+            )
             pairs[edit.key] = edit
         }
+    }
+
+    public func addPositiveCollocation(left: String, right: String) {
+        addCollocation(left: left, right: right, polarity: .positive)
+    }
+
+    public func addNegativeCollocation(left: String, right: String) {
+        addCollocation(left: left, right: right, polarity: .negative)
     }
 
     /// Pairs have no "disabled" state. A word edit keeps a tombstone because
     /// there is a system value underneath it to come back to; a pair is entirely
     /// the user's own, so removing it leaves nothing behind to describe.
     public func removeCollocation(left: String, right: String) {
-        mutateCollocations { $0[CollocationKey(left: left, right: right)] = nil }
+        let key = CollocationKey(left: left, right: right)
+        mutateCollocations { pairs in
+            pairs[key] = nil
+            // Negative relations are unordered, so removing either display
+            // order removes the stored relation.
+            for (storedKey, edit) in pairs where
+                edit.polarity == .negative && storedKey.isUnorderedMatch(key) {
+                pairs[storedKey] = nil
+            }
+        }
     }
 
     public var collocations: [CollocationEdit] { dictionary.allCollocations }
+
+    public var positiveCollocations: [CollocationEdit] {
+        collocations.filter { $0.polarity == .positive }
+    }
+
+    public var negativeCollocations: [CollocationEdit] {
+        collocations.filter { $0.polarity == .negative }
+    }
 
     /// The words the 共起 pane offers in its two menus: every content word in
     /// any candidate, in the order they were first seen.

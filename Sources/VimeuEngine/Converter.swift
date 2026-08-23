@@ -161,24 +161,51 @@ public final class Converter: Sendable {
         guard !scalars.isEmpty else { return [] }
 
         let pairs = dictionary.collocations
+        let negativePairs = dictionary.negativeCollocations
 
         let codes = dictionary.encode(reading)
         let lattice = Lattice.build(reading: scalars, codes: codes, dictionary: dictionary)
         let viterbi = Viterbi.run(lattice: lattice, dictionary: dictionary)
-        let paths = NBest.search(
-            lattice: lattice, viterbi: viterbi, dictionary: dictionary, limit: limit,
-            extension: pairs.isEmpty ? nil : NBest.Extension(
+        let searchExtension: NBest.Extension?
+        if !negativePairs.isEmpty {
+            // A forbidden path may be the Viterbi winner, so its cost cannot be
+            // used as the ceiling for the search. Keep enumerating until enough
+            // allowed paths have been found; the normal NBest expansion cap is
+            // still the safety valve for a dense lattice.
+            let nodes = lattice.nodes
+            let acceptsPath: @Sendable ([Int]) -> Bool = { path in
+                !Collocation.containsNegativePair(
+                    in: path.map { nodes[$0].surface }, table: negativePairs
+                )
+            }
+            searchExtension = NBest.Extension(
+                limit: max(limit, pairs.isEmpty ? 1 : Self.rerankDepth),
+                ceiling: Int32.max,
+                acceptsPath: acceptsPath
+            )
+        } else if !pairs.isEmpty {
+            searchExtension = NBest.Extension(
                 limit: max(limit, Self.rerankDepth),
                 ceiling: viterbi.totalCost + UserDict.collocationWindow
             )
+        } else {
+            searchExtension = nil
+        }
+
+        let paths = NBest.search(
+            lattice: lattice, viterbi: viterbi, dictionary: dictionary, limit: limit,
+            extension: searchExtension
         )
 
         let candidates = paths.map { path in
             candidate(from: path, lattice: lattice, reading: scalars)
         }
-        guard !pairs.isEmpty else { return candidates }
+        guard !pairs.isEmpty || !negativePairs.isEmpty else { return candidates }
         return Array(
-            Collocation.rerank(candidates, pairs: pairs, dictionary: dictionary).prefix(limit)
+            Collocation.rerank(
+                candidates, pairs: pairs, negativePairs: negativePairs,
+                dictionary: dictionary
+            ).prefix(limit)
         )
     }
 

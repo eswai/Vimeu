@@ -48,10 +48,15 @@ public protocol DictionarySource: Sendable {
     /// packed dictionary has no such table and never will, because these are
     /// edits (§2.3), not data shipped with the dictionary.
     var collocations: Set<CollocationKey> { get }
+
+    /// Word pairs that are mutually exclusive. Unlike positive collocations,
+    /// these are a hard constraint applied after a complete path is formed.
+    var negativeCollocations: Set<CollocationKey> { get }
 }
 
 extension DictionarySource {
     public var collocations: Set<CollocationKey> { [] }
+    public var negativeCollocations: Set<CollocationKey> { [] }
 }
 
 public struct DictionaryStatistics: Sendable {

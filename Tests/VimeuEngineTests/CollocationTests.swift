@@ -109,6 +109,39 @@ final class CollocationTests: XCTestCase {
         XCTAssertEqual(winner.connectionCost, 350)
     }
 
+    func testNegativePairExcludesMatchingCandidatesAbsolutely() throws {
+        editor.addNegativeCollocation(left: "皮", right: "剥く")
+        let candidates = convert("かわをむく")
+
+        XCTAssertFalse(candidates.contains { $0.text == "皮を剥く" })
+        XCTAssertTrue(candidates.allSatisfy {
+            !Collocation.containsNegativePair(
+                in: $0.segments,
+                table: editor.dictionary.negativeCollocations,
+                dictionary: editor.dictionary
+            )
+        })
+        XCTAssertTrue(editor.dictionary.collocations.isEmpty)
+        XCTAssertEqual(
+            editor.dictionary.negativeCollocations,
+            [CollocationKey(left: "剥く", right: "皮")]
+        )
+    }
+
+    func testNegativePairIsUnorderedAndReplacesOppositeRelation() throws {
+        editor.addPositiveCollocation(left: "皮", right: "剥く")
+        editor.addNegativeCollocation(left: "剥く", right: "皮")
+
+        XCTAssertTrue(editor.dictionary.collocations.isEmpty)
+        XCTAssertEqual(
+            editor.collocations.first?.polarity,
+            .negative
+        )
+        XCTAssertEqual(editor.collocations.first?.left, "剥く")
+        XCTAssertEqual(editor.collocations.first?.right, "皮")
+        XCTAssertFalse(convert("かわをむく").contains { $0.text == "皮を剥く" })
+    }
+
     /// Pairs are ordered. `(剥く, 皮)` is a different pair and does not fire on
     /// `皮を剥く`.
     func testPairsAreDirectional() throws {
@@ -185,10 +218,15 @@ final class CollocationTests: XCTestCase {
 
     func testPairsSurviveAReload() throws {
         editor.addCollocation(left: "皮", right: "剥く")
+        editor.addNegativeCollocation(left: "川", right: "剥く")
 
         let reopened = DictionaryEditor(system: system, store: UserDictionaryStore(directory: directory))
         XCTAssertEqual(
             reopened.dictionary.collocations, [CollocationKey(left: "皮", right: "剥く")]
+        )
+        XCTAssertEqual(
+            reopened.dictionary.negativeCollocations,
+            [CollocationKey(left: "剥く", right: "川")]
         )
         XCTAssertEqual(
             Converter(dictionary: reopened.dictionary).convert(reading: "かわをむく").first?.text,

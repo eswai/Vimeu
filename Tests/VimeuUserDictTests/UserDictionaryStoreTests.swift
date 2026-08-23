@@ -52,14 +52,40 @@ final class UserDictionaryStoreTests: XCTestCase {
             CollocationKey(left: "風邪", right: "ひく"): CollocationEdit(
                 left: "風邪", right: "ひく", updatedAt: 222
             ),
+            CollocationKey(left: "川", right: "剥く"): CollocationEdit(
+                left: "川", right: "剥く", polarity: .negative, updatedAt: 333
+            ),
         ]
         try store.saveCollocations(pairs)
 
         let loaded = try store.load().collocations
-        XCTAssertEqual(loaded.count, 2)
+        XCTAssertEqual(loaded.count, 3)
         XCTAssertEqual(loaded[CollocationKey(left: "皮", right: "剥く")]?.updatedAt, 111)
+        XCTAssertEqual(
+            loaded[CollocationKey(left: "川", right: "剥く")]?.polarity,
+            .negative
+        )
         // Ordered: the reverse pair is a different key and is not present.
         XCTAssertNil(loaded[CollocationKey(left: "剥く", right: "皮")])
+    }
+
+    func testOldCollocationRowsLoadAsPositive() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try """
+        left\tright\tupdated_at
+        皮\t剥く\t111
+        """.write(
+            to: directory.appendingPathComponent("user_collocation.tsv"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let loaded = try store.load().collocations
+        XCTAssertEqual(
+            loaded[CollocationKey(left: "皮", right: "剥く")]?.polarity,
+            .positive
+        )
+        XCTAssertEqual(loaded[CollocationKey(left: "皮", right: "剥く")]?.updatedAt, 111)
     }
 
     /// Words and pairs live in separate files, and saving one must not disturb

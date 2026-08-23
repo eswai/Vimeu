@@ -62,6 +62,10 @@ public final class OverlaidDictionary: DictionarySource, @unchecked Sendable {
     /// snapshot, so an edit swaps them in as one consistent unit.
     public let collocations: Set<CollocationKey>
 
+    /// The user's mutually exclusive pairs. These are kept separate from the
+    /// positive set because a negative pair is a hard filter, not a score.
+    public let negativeCollocations: Set<CollocationKey>
+
     private let collocationEdits: [CollocationKey: CollocationEdit]
 
     /// The user's connection edits, resolved from POS names onto the cell index
@@ -91,7 +95,12 @@ public final class OverlaidDictionary: DictionarySource, @unchecked Sendable {
     public init(system: DicReader, edits: UserDictionaryStore.Snapshot) {
         self.system = system
         self.words = edits.words
-        self.collocations = Set(edits.collocations.keys)
+        self.collocations = Set(edits.collocations.values
+            .filter { $0.polarity == .positive }
+            .map(\.key))
+        self.negativeCollocations = Set(edits.collocations.values
+            .filter { $0.polarity == .negative }
+            .map(\.key))
         self.collocationEdits = edits.collocations
         self.connectionEdits = edits.connections
         self.editedSurfaces = Set(edits.words.keys.map(\.surface))

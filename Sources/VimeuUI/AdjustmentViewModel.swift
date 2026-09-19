@@ -12,13 +12,14 @@ public final class AdjustmentViewModel: ObservableObject {
     /// Which pane the window is showing. Held here rather than in the view
     /// because the switcher lives in the window's toolbar, outside it.
     public enum Tab: String, Hashable, CaseIterable, Sendable {
-        case words, collocations, connections
+        case words, collocations, connections, liveConversion
 
         public var title: String {
             switch self {
             case .words: return "単語"
             case .collocations: return "共起"
             case .connections: return "接続"
+            case .liveConversion: return "設定"
             }
         }
     }

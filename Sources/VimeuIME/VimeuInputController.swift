@@ -162,7 +162,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         Settings.liveConversion.toggle()
         // Turning it off mid-composition drops the inline conversion back to
         // raw kana rather than leaving a stale one on screen.
-        if !Settings.liveConversion, liveState != nil {
+        if !Settings.liveConversion {
             liveState = nil
             coordinator.reset()
             updateMarkedText(client: client())
@@ -274,7 +274,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// sees finished kana.
     private func submitLive() {
         guard Settings.liveConversion else { return }
-        coordinator.submit(reading: buffer.reading)
+        coordinator.submit(reading: buffer.reading, delayMilliseconds: LiveConversionSettings.delayMilliseconds)
     }
 
     /// A live conversion came back: refresh the inline marked text.

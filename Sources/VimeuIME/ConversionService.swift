@@ -99,54 +99,77 @@ final class ConversionService: @unchecked Sendable {
 /// current are dropped, so the inline text can't flash back to an older
 /// conversion.
 ///
-/// There is no debounce timer. The predecessor needed one because every
-/// keystroke meant a gRPC round trip to another process; in-process conversion
-/// is cheap enough that delaying it would only add lag.
+/// Each input restarts the configurable idle timer, including pending romaji.
+/// Generation checks discard completions from before an input or reset.
 ///
 /// All state is touched on the main thread, matching the controller — which is
 /// what the `@unchecked Sendable` stands on. It is needed because the result
 /// callback is handed across to the conversion queue and back.
 final class LiveConversionCoordinator: @unchecked Sendable {
-    private let service: ConversionService
+    typealias Convert = (String, @escaping @MainActor ([Candidate], String) -> Void) -> Void
+    private let convert: Convert
     private var latestReading = ""
     private var inFlight = false
+    private var generation: UInt64 = 0
+    private var ready = false
+    private var timer: DispatchWorkItem?
 
     /// Called on the main actor with (candidates, reading) for the newest
     /// reading only.
     var onResult: (@MainActor ([Candidate], String) -> Void)?
 
     init(service: ConversionService = .shared) {
-        self.service = service
+        self.convert = { reading, completion in
+            service.convert(reading: reading, limit: 1, completion: completion)
+        }
     }
 
-    func submit(reading: String) {
+    init(convert: @escaping Convert) {
+        self.convert = convert
+    }
+
+    func submit(reading: String, delayMilliseconds: Int = 0) {
+        reset()
         latestReading = reading
-        pumpIfIdle()
+        guard !reading.isEmpty else { return }
+        if delayMilliseconds <= 0 {
+            ready = true
+            pumpIfIdle()
+            return
+        }
+        let submittedGeneration = generation
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.generation == submittedGeneration else { return }
+            self.timer = nil
+            self.ready = true
+            self.pumpIfIdle()
+        }
+        timer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMilliseconds), execute: work)
     }
 
-    /// Drop the pending reading so an in-flight completion won't re-fire.
-    /// Call when leaving the composing state.
+    /// Invalidate both the idle timer and any running conversion's result.
     func reset() {
+        timer?.cancel()
+        timer = nil
+        generation &+= 1
         latestReading = ""
+        ready = false
     }
 
     private func pumpIfIdle() {
-        guard !inFlight else { return }  // the in-flight completion re-pumps
-        pump()
-    }
-
-    private func pump() {
+        guard !inFlight, ready, !latestReading.isEmpty else { return }
         let reading = latestReading
-        guard !reading.isEmpty else { return }
+        let submittedGeneration = generation
+        ready = false
         inFlight = true
-        service.convert(reading: reading, limit: 1) { [weak self] candidates, converted in
+        convert(reading) { [weak self] candidates, converted in
             guard let self else { return }
             self.inFlight = false
-            if converted == self.latestReading, !candidates.isEmpty {
+            if submittedGeneration == self.generation, !candidates.isEmpty {
                 self.onResult?(candidates, converted)
             }
-            // A newer reading arrived while this one was running.
-            if self.latestReading != converted { self.pump() }
+            self.pumpIfIdle()
         }
     }
 }

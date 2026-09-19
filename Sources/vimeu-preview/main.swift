@@ -13,7 +13,7 @@ import SwiftUI
 // 2026 input-method guidelines recommend for exactly that reason.
 //
 //   swift run vimeu-preview [--dic <path>] [--reading <kana>] [--user <dir>]
-//                            [--tab words|collocations|connections] [--dark]
+//                            [--tab words|collocations|connections|liveConversion] [--dark]
 //                            [--snapshot <out.png>]
 //
 // With --snapshot it renders the window to a PNG and exits, so a layout change

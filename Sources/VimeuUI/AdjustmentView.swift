@@ -1,5 +1,6 @@
 import SwiftUI
 import VimeuEngine
+import VimeuInput
 import VimeuUserDict
 
 /// The tuning window's content.
@@ -26,13 +27,16 @@ public struct AdjustmentView: View {
         // the pane below changes size, so the panes take all remaining height
         // rather than letting the stack centre itself.
         VStack(spacing: 0) {
-            header
-            Divider()
+            if model.tab != .liveConversion {
+                header
+                Divider()
+            }
             Group {
                 switch model.tab {
                 case .words: wordsTab
                 case .collocations: collocationsTab
                 case .connections: connectionsTab
+                case .liveConversion: LiveConversionSettingsView()
                 }
             }
             // Fills the rest of the window. Hugging the top instead left the
@@ -669,5 +673,50 @@ private struct AddWordSheet: View {
         }
         .padding(20)
         .frame(width: 380)
+    }
+}
+
+private struct LiveConversionSettingsView: View {
+    @AppStorage(LiveConversionSettings.delayKey) private var delay = LiveConversionSettings.defaultDelay
+    @State private var text = ""
+    @State private var invalid = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Form {
+            Section("変換を開始するタイミング") {
+                HStack {
+                    Text("キー入力を停止してから")
+                    TextField("待ち時間", text: $text)
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.trailing)
+                        .monospacedDigit()
+                        .frame(width: 100)
+                        .focused($focused)
+                        .onSubmit(commit)
+                        .onChange(of: focused) { _, value in if !value { commit() } }
+                    Text("ms 後に変換を開始")
+                }
+                if invalid {
+                    Text("0〜60000 の整数を入力してください。設定は変更されていません。")
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { text = String(LiveConversionSettings.clamp(delay)) }
+        .onDisappear { commit() }
+    }
+
+    private func commit() {
+        guard let value = Int(text.trimmingCharacters(in: .whitespaces)),
+              LiveConversionSettings.delayRange.contains(value) else {
+            invalid = true
+            return
+        }
+        delay = value
+        text = String(value)
+        invalid = false
     }
 }

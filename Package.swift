@@ -33,7 +33,7 @@ let package = Package(
         // Candidate panel. MainActor by default: every AppKit touch is main-thread.
         .target(
             name: "VimeuUI",
-            dependencies: ["VimeuEngine", "VimeuUserDict"],
+            dependencies: ["VimeuEngine", "VimeuUserDict", "VimeuInput"],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
 
@@ -74,6 +74,7 @@ let package = Package(
         .testTarget(name: "VimeuEngineTests", dependencies: ["VimeuEngine"]),
         .testTarget(name: "VimeuUserDictTests", dependencies: ["VimeuUserDict"]),
         .testTarget(name: "VimeuInputTests", dependencies: ["VimeuInput"]),
+        .testTarget(name: "VimeuIMETests", dependencies: ["VimeuIME"]),
         .testTarget(
             name: "VimeuUITests",
             dependencies: ["VimeuUI", "VimeuDict", "VimeuEngine", "VimeuUserDict"]

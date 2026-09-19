@@ -59,6 +59,19 @@ final class CandidateViewModelTests: XCTestCase {
             model.selectedCandidateWordIDs,
             Set(expectedCandidates[0].segments.map { $0.reading + "\t" + $0.surface })
         )
+        var expectedJumpIDs: [String] = []
+        for segment in expectedCandidates[0].segments {
+            let id = segment.reading + "\t" + segment.surface
+            if !expectedJumpIDs.contains(id) {
+                expectedJumpIDs.append(id)
+            }
+        }
+        XCTAssertEqual(
+            AdjustmentView.candidateWordIDsForJump(
+                candidate: expectedCandidates[0], words: model.words
+            ),
+            expectedJumpIDs
+        )
 
         model.selectedCandidate = 1
         XCTAssertEqual(

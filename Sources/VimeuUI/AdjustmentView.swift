@@ -294,8 +294,8 @@ public struct AdjustmentView: View {
     }
 
     /// Select a candidate and advance through its highlighted word rows. The
-    /// order is the order in the word table, so the first click always reveals
-    /// the top-most matching row the user can edit.
+    /// order follows the candidate's displayed segmentation, while the IDs
+    /// still point at the corresponding rows in the word table.
     private func selectCandidateAndRequestWordJump(_ index: Int) {
         guard model.candidates.indices.contains(index) else { return }
         let candidateText = model.candidates[index].text
@@ -305,9 +305,10 @@ public struct AdjustmentView: View {
             nextJumpOrdinal = 0
         }
 
-        let wordIDs = model.words
-            .filter { model.selectedCandidateWordIDs.contains($0.id) }
-            .map(\.id)
+        let wordIDs = Self.candidateWordIDsForJump(
+            candidate: model.candidates[index],
+            words: model.words
+        )
         guard !wordIDs.isEmpty else { return }
 
         let target = wordIDs[nextJumpOrdinal % wordIDs.count]
@@ -315,6 +316,22 @@ public struct AdjustmentView: View {
         requestedWordID = target
         wordScrollRequest += 1
         wordScrollPosition.scrollTo(id: target, anchor: .center)
+    }
+
+    /// Converts the candidate's displayed segmentation into the IDs of the
+    /// rows available in the word table. A table has one row per dictionary
+    /// entry, so repeated use of the same entry in a candidate is collapsed.
+    static func candidateWordIDsForJump(
+        candidate: Candidate,
+        words: [WordKnob]
+    ) -> [WordKnob.ID] {
+        let availableIDs = Set(words.map(\.id))
+        var seen = Set<WordKnob.ID>()
+        return candidate.segments.compactMap { segment in
+            let id = segment.reading + "\t" + segment.surface
+            guard availableIDs.contains(id), seen.insert(id).inserted else { return nil }
+            return id
+        }
     }
 
     /// `名詞,固有名詞,人名,姓,*,*,*` → `名詞,固有名詞,人名,姓`.

@@ -55,5 +55,15 @@ final class CandidateViewModelTests: XCTestCase {
             model.words,
             editor.wordKnobs(for: expectedCandidates, reading: "はし")
         )
+        XCTAssertEqual(
+            model.selectedCandidateWordIDs,
+            Set(expectedCandidates[0].segments.map { $0.reading + "\t" + $0.surface })
+        )
+
+        model.selectedCandidate = 1
+        XCTAssertEqual(
+            model.selectedCandidateWordIDs,
+            Set(expectedCandidates[1].segments.map { $0.reading + "\t" + $0.surface })
+        )
     }
 }

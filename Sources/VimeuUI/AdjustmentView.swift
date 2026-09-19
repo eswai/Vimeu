@@ -198,8 +198,12 @@ public struct AdjustmentView: View {
                 )
             } else {
                 let ambiguous = model.ambiguousSurfaces
+                // Calculate once per render: a candidate can have thousands of
+                // pooled word rows, all of which consult this same path.
+                let selectedWordIDs = model.selectedCandidateWordIDs
                 Table(model.words) {
                     TableColumn("表記") { knob in
+                        let isMatched = selectedWordIDs.contains(knob.id)
                         VStack(alignment: .leading, spacing: 0) {
                             Text(knob.surface)
                                 .strikethrough(knob.deleted)
@@ -213,28 +217,39 @@ public struct AdjustmentView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        .wordMatchBackground(isMatched, leadingAccent: true)
+                        .accessibilityLabel(
+                            isMatched
+                                ? "\(knob.surface)、選択中の候補に含まれる単語"
+                                : knob.surface
+                        )
                     }
                     // Mozc keys entries by POS and the same spelling can be
                     // registered under several, with different costs and
                     // different neighbours. Without this the rows are
                     // indistinguishable.
                     TableColumn("品詞") { knob in
+                        let isMatched = selectedWordIDs.contains(knob.id)
                         Text(knob.posNames.map(Self.shortPOS).joined(separator: " / "))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .help(knob.posNames.joined(separator: "\n"))
+                            .wordMatchBackground(isMatched)
                     }
                     .width(min: 100, ideal: 130)
                     TableColumn("コスト") { knob in
+                        let isMatched = selectedWordIDs.contains(knob.id)
                         CostField(
                             value: knob.cost,
                             base: knob.userOverride ? knob.baseCost : nil,
                             onSet: { model.setCost(knob, to: $0) }
                         )
+                        .wordMatchBackground(isMatched)
                     }
                     .width(min: 120, ideal: 128)
                     TableColumn("") { knob in
+                        let isMatched = selectedWordIDs.contains(knob.id)
                         KnobActions(
                             deleted: knob.deleted,
                             canReset: knob.userOverride || knob.deleted,
@@ -243,6 +258,7 @@ public struct AdjustmentView: View {
                             onRevive: { model.revive(knob) },
                             onReset: { model.reset(knob) }
                         )
+                        .wordMatchBackground(isMatched)
                     }
                     .width(min: 132, ideal: 140)
                 }
@@ -475,6 +491,30 @@ public struct AdjustmentView: View {
                 .lineLimit(1)
         }
         .help(pos)
+    }
+}
+
+private extension View {
+    /// A quiet, full-row cue that connects a selected candidate to the exact
+    /// dictionary entries that made it.  Semantic system colours preserve the
+    /// contrast in both light and dark appearances.
+    @ViewBuilder
+    func wordMatchBackground(_ isMatched: Bool, leadingAccent: Bool = false) -> some View {
+        if isMatched {
+            self
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.leading, leadingAccent ? 4 : 0)
+                .background(Color(nsColor: .selectedContentBackgroundColor).opacity(0.18))
+                .overlay(alignment: .leading) {
+                    if leadingAccent {
+                        Rectangle()
+                            .fill(Color.accentColor)
+                            .frame(width: 3)
+                    }
+                }
+        } else {
+            self
+        }
     }
 }
 

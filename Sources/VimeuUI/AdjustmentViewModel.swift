@@ -64,6 +64,18 @@ public final class AdjustmentViewModel: ObservableObject {
         return repeated
     }
 
+    /// Dictionary-entry IDs used by the candidate the user is inspecting.
+    ///
+    /// `WordKnob.id` contains both reading and surface.  Matching on the
+    /// surface alone would highlight a different entry when, for example, the
+    /// same spelling has more than one reading.
+    public var selectedCandidateWordIDs: Set<String> {
+        guard candidates.indices.contains(selectedCandidate) else { return [] }
+        return Set(candidates[selectedCandidate].segments.map {
+            $0.reading + "\t" + $0.surface
+        })
+    }
+
     /// The transitions of the selected candidate — the whole content of the
     /// 接続 pane, each with the edit state of the matrix cell behind it.
     ///

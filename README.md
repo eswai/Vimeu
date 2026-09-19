@@ -32,7 +32,8 @@ Mozc 自身の回帰データ（`data/dictionary_oss/evaluation.tsv` のうち M
 
 ## 動作環境
 
-macOS 14 以降。ビルドには Swift 6.2 以降（Xcode コマンドラインツール）が必要。
+macOS 26 以降。現在の macOS 27 SDK では macOS 25 の deployment target を指定できないため、
+SwiftPM の最小ビルド対象を 26 にしている。ビルドには Swift 6.2 以降（Xcode コマンドラインツール）が必要。
 
 ## 辞書データの用意
 

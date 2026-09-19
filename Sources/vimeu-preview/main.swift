@@ -83,28 +83,20 @@ window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps: true)
 
 if let snapshotPath = flags["snapshot"] {
-    // Give SwiftUI a moment to lay out and draw, then capture the window as the
-    // window server composites it.
-    //
-    // `cacheDisplay(in:to:)` would be simpler but draws only what the view
-    // hierarchy renders itself: vibrancy and other separately-composited layers
-    // come out empty, which reads as missing controls rather than as a capture
-    // artefact. Capturing just this window keeps the rest of the desktop out.
-    //
-    // ScreenCaptureKit is the supported replacement, but it is async and asks
-    // for screen-recording permission — too much ceremony for a dev-only
-    // harness, so the deprecated call stands.
+    // Give SwiftUI a moment to lay out and draw, then capture the content view.
+    // The old window-server capture function is unavailable with the macOS 26
+    // deployment target, and ScreenCaptureKit would add a screen-recording
+    // permission prompt to this development-only harness.
     let delay = Double(flags["delay"] ?? "") ?? 1.5
     Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
         MainActor.assumeIsolated {
-            let windowID = CGWindowID(window.windowNumber)
-            guard let image = CGWindowListCreateImage(
-                .null, .optionIncludingWindow, windowID, [.boundsIgnoreFraming, .bestResolution]
-            ) else {
+            guard let contentView = window.contentView,
+                  let rep = contentView.bitmapImageRepForCachingDisplay(in: contentView.bounds)
+            else {
                 FileHandle.standardError.write(Data("vimeu-preview: capture failed\n".utf8))
                 exit(1)
             }
-            let rep = NSBitmapImageRep(cgImage: image)
+            contentView.cacheDisplay(in: contentView.bounds, to: rep)
             guard let png = rep.representation(using: .png, properties: [:]) else { exit(1) }
             try? png.write(to: URL(fileURLWithPath: snapshotPath))
             print("wrote \(snapshotPath)")

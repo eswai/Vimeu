@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import VimeuEngine
 import VimeuInput
 import VimeuUserDict
@@ -17,6 +18,14 @@ public struct AdjustmentView: View {
     @ObservedObject var model: AdjustmentViewModel
 
     @State private var showAddWord = false
+    /// The row ID currently requested by a candidate click. `Table` keeps its
+    /// own native scroll view; the declarative position is kept in sync while
+    /// the AppKit proxy below performs the actual row jump on macOS.
+    @State private var wordScrollPosition = ScrollPosition(idType: WordKnob.ID.self)
+    @State private var jumpCandidateText: String?
+    @State private var nextJumpOrdinal = 0
+    @State private var requestedWordID: WordKnob.ID?
+    @State private var wordScrollRequest = 0
 
     public init(model: AdjustmentViewModel) {
         self.model = model
@@ -125,7 +134,7 @@ public struct AdjustmentView: View {
         showsCollocationCost: Bool
     ) -> some View {
         Button {
-            model.selectedCandidate = index
+            selectCandidateAndRequestWordJump(index)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("\(index + 1)")
@@ -262,6 +271,18 @@ public struct AdjustmentView: View {
                     }
                     .width(min: 132, ideal: 140)
                 }
+                .scrollPosition($wordScrollPosition, anchor: .center)
+                // ScrollPosition remains attached to the Table as the view's
+                // declarative scroll state. On macOS 27, Table is backed by
+                // NSTableView and that modifier does not move the native row;
+                // this proxy performs the actual jump without replacing Table.
+                .background(
+                    WordTableScrollProxy(
+                        rowIDs: model.words.map(\.id),
+                        targetID: requestedWordID,
+                        request: wordScrollRequest
+                    )
+                )
             }
             Spacer(minLength: 0)
             TabFooter(
@@ -270,6 +291,30 @@ public struct AdjustmentView: View {
                 action: { showAddWord = true }
             )
         }
+    }
+
+    /// Select a candidate and advance through its highlighted word rows. The
+    /// order is the order in the word table, so the first click always reveals
+    /// the top-most matching row the user can edit.
+    private func selectCandidateAndRequestWordJump(_ index: Int) {
+        guard model.candidates.indices.contains(index) else { return }
+        let candidateText = model.candidates[index].text
+        model.selectedCandidate = index
+        if jumpCandidateText != candidateText {
+            jumpCandidateText = candidateText
+            nextJumpOrdinal = 0
+        }
+
+        let wordIDs = model.words
+            .filter { model.selectedCandidateWordIDs.contains($0.id) }
+            .map(\.id)
+        guard !wordIDs.isEmpty else { return }
+
+        let target = wordIDs[nextJumpOrdinal % wordIDs.count]
+        nextJumpOrdinal = (nextJumpOrdinal + 1) % wordIDs.count
+        requestedWordID = target
+        wordScrollRequest += 1
+        wordScrollPosition.scrollTo(id: target, anchor: .center)
     }
 
     /// `名詞,固有名詞,人名,姓,*,*,*` → `名詞,固有名詞,人名,姓`.
@@ -491,6 +536,119 @@ public struct AdjustmentView: View {
                 .lineLimit(1)
         }
         .help(pos)
+    }
+}
+
+/// A zero-sized AppKit view used to reach the native table behind SwiftUI's
+/// `Table`. SwiftUI's `ScrollPosition` API currently updates a ScrollView but
+/// does not move the NSTableView that renders a macOS Table, so the native
+/// `scrollRowToVisible` operation is needed for this one interaction.
+private struct WordTableScrollProxy: NSViewRepresentable {
+    let rowIDs: [WordKnob.ID]
+    let targetID: WordKnob.ID?
+    let request: Int
+
+    func makeNSView(context: Context) -> WordTableScrollAnchor {
+        WordTableScrollAnchor()
+    }
+
+    func updateNSView(_ nsView: WordTableScrollAnchor, context: Context) {
+        nsView.update(rowIDs: rowIDs, targetID: targetID, request: request)
+    }
+}
+
+private final class WordTableScrollAnchor: NSView {
+    private var rowIDs: [WordKnob.ID] = []
+    private var targetID: WordKnob.ID?
+    private var request = 0
+    private var scheduledRequest: Int?
+    private var retryCount = 0
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isHidden = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        isHidden = true
+    }
+
+    func update(rowIDs: [WordKnob.ID], targetID: WordKnob.ID?, request: Int) {
+        self.rowIDs = rowIDs
+        self.targetID = targetID
+        if self.request != request {
+            retryCount = 0
+        }
+        self.request = request
+        scheduleScroll()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        scheduleScroll()
+    }
+
+    private func scheduleScroll() {
+        guard targetID != nil, window != nil else { return }
+        guard scheduledRequest != request else { return }
+        scheduledRequest = request
+        let request = request
+        DispatchQueue.main.async { [weak self] in
+            self?.performScroll(for: request)
+        }
+    }
+
+    private func performScroll(for request: Int) {
+        scheduledRequest = nil
+        guard request == self.request,
+              let targetID,
+              let row = rowIDs.firstIndex(of: targetID)
+        else { return }
+
+        guard let table = findTable(in: window?.contentView) else {
+            // SwiftUI can create this proxy one layout pass before Table's
+            // NSTableView. Retry briefly, but never leave a timer running.
+            guard retryCount < 8 else { return }
+            retryCount += 1
+            DispatchQueue.main.async { [weak self] in
+                self?.scheduleScroll()
+            }
+            return
+        }
+
+        guard row < table.numberOfRows else {
+            guard retryCount < 8 else { return }
+            retryCount += 1
+            DispatchQueue.main.async { [weak self] in
+                self?.scheduleScroll()
+            }
+            return
+        }
+        // NSTableView guarantees visibility; centering the row afterwards makes
+        // repeated clicks visibly advance even when both rows were nearby.
+        table.scrollRowToVisible(row)
+        guard let scrollView = table.enclosingScrollView else { return }
+        let clipView = scrollView.contentView
+        let rowRect = table.rect(ofRow: row)
+        let maxOriginY = max(0, table.bounds.height - clipView.bounds.height)
+        let centeredOriginY = max(
+            0,
+            min(rowRect.midY - clipView.bounds.height / 2, maxOriginY)
+        )
+        clipView.setBoundsOrigin(
+            NSPoint(x: clipView.bounds.origin.x, y: centeredOriginY)
+        )
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    private func findTable(in view: NSView?) -> NSTableView? {
+        guard let view else { return nil }
+        if let table = view as? NSTableView { return table }
+        for child in view.subviews {
+            if let table = findTable(in: child) { return table }
+        }
+        return nil
     }
 }
 

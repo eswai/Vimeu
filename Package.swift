@@ -5,7 +5,9 @@ import PackageDescription
 // single process linking nothing but system frameworks. See DESIGN.md §1.
 let package = Package(
     name: "vimeu",
-    platforms: [.macOS(.v14)],
+    // The installed macOS 27 SDK does not define a macOS 25 deployment target;
+    // v26 is the lowest buildable target in this toolchain.
+    platforms: [.macOS(.v26)],
     products: [
         .executable(name: "VimeuIME", targets: ["VimeuIME"]),
         .executable(name: "vimeu-dictbuild", targets: ["vimeu-dictbuild"]),

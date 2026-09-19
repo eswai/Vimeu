@@ -86,113 +86,22 @@ public struct AdjustmentView: View {
                     .font(.callout)
             }
 
-            // One fixed height either way, and a whole number of rows, so the
-            // list never ends on a half-drawn row and nothing above it moves
-            // when a conversion arrives.
-            Group {
-                if model.candidates.isEmpty {
-                    Text("読みを入力して変換すると、候補と、それを組み立てた辞書エントリが出ます。")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    let showsCollocationCost = model.candidates.contains {
-                        $0.collocationCost != 0
-                    }
-                    ScrollView(.vertical) {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(model.candidates.indices, id: \.self) { index in
-                                candidateRow(
-                                    index: index,
-                                    candidate: model.candidates[index],
-                                    showsCollocationCost: showsCollocationCost
-                                )
-                            }
-                        }
-                    }
-                }
+            if model.candidates.isEmpty {
+                Text("読みを入力して変換すると、候補と、それを組み立てた辞書エントリが出ます。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: CandidateCostGraph.emptyHeight, alignment: .top)
+            } else {
+                CandidateCostGraph(
+                    candidates: model.candidates,
+                    selectedCandidate: model.selectedCandidate,
+                    onSelect: selectCandidateAndRequestWordJump
+                )
             }
-            .frame(height: Self.candidateRowHeight * 5)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
-    }
-
-    private static let candidateRowHeight: CGFloat = 22
-
-    /// A candidate, shown as its segmentation.
-    ///
-    /// Only the split form: the pieces are exactly the dictionary entries the
-    /// candidate was built from and the rows of the 単語 pane below, so showing
-    /// the plain string alongside it would say the same thing twice.
-    ///
-    /// Selecting a row is what the 接続 pane explains, so the whole row is a
-    /// button rather than the tap target being some small affordance.
-    private func candidateRow(
-        index: Int,
-        candidate: Candidate,
-        showsCollocationCost: Bool
-    ) -> some View {
-        Button {
-            selectCandidateAndRequestWordJump(index)
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("\(index + 1)")
-                    .font(.callout).monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16, alignment: .trailing)
-                Text(candidate.segments.map(\.surface).joined(separator: " · "))
-                    .fontWeight(index == 0 ? .semibold : .regular)
-                    .lineLimit(1)
-                Spacer(minLength: 12)
-                // 合計 = 単語 + 接続 + 共起, exactly.
-                costCell("合計", candidate.cost, emphasised: true)
-                costCell("単語", candidate.wordCost)
-                costCell("接続", candidate.connectionCost)
-                // Only once a pair is in play. Until then the column would be a
-                // row of zeros explaining a feature the user has not used.
-                if showsCollocationCost {
-                    costCell("共起", candidate.collocationCost)
-                }
-            }
-            .frame(height: Self.candidateRowHeight)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(
-            model.selectedCandidate == index
-                ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.25)
-                : Color.clear
-        )
-        .help(costTooltip(for: candidate, showsCollocationCost: showsCollocationCost))
-    }
-
-    private func costTooltip(for candidate: Candidate, showsCollocationCost: Bool) -> String {
-        var text = "合計 \(candidate.cost) ＝ 単語 \(candidate.wordCost)"
-            + " ＋ 接続 \(candidate.connectionCost)"
-        if showsCollocationCost {
-            text += " ＋ 共起 \(candidate.collocationCost)"
-        }
-        text += "（コストは小さいほど優先）"
-        if !candidate.collocations.isEmpty {
-            text += "\n共起: " + candidate.collocations
-                .map { "\($0.left) → \($0.right)" }
-                .joined(separator: "、")
-        }
-        return text
-    }
-
-    private func costCell(_ label: String, _ value: Int32, emphasised: Bool = false) -> some View {
-        HStack(spacing: 3) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            Text("\(value)")
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(emphasised ? .secondary : .tertiary)
-        }
-        .frame(width: 66, alignment: .trailing)
     }
 
     // MARK: - Words
@@ -553,6 +462,341 @@ public struct AdjustmentView: View {
                 .lineLimit(1)
         }
         .help(pos)
+    }
+}
+
+/// The graph above the dictionary tables. The chart keeps the candidate text
+/// split into its dictionary entries, while making the three numbers that
+/// explain the ranking visible at the same time.
+private enum CandidateGraphLayout {
+    static let totalColumnWidth: CGFloat = 78
+    static let columnSpacing: CGFloat = 8
+    static let horizontalPadding: CGFloat = 6
+
+    /// Give the candidate label twice the width of the graph, after reserving
+    /// the fixed total column and the two column gaps.
+    static func columns(in width: CGFloat) -> (label: CGFloat, graph: CGFloat) {
+        let fixed = horizontalPadding * 2
+            + totalColumnWidth
+            + columnSpacing * 2
+        let flexible = max(0, width - fixed)
+        let graph = flexible / 3
+        return (label: flexible - graph, graph: graph)
+    }
+}
+
+private struct CandidateCostGraph: View {
+    static let emptyHeight: CGFloat = 150
+
+    private static let visibleRowCount = 5
+    private static let axisHeight: CGFloat = 18
+    private static let breakdownRowHeight: CGFloat = 30
+
+    let candidates: [Candidate]
+    let selectedCandidate: Int
+    let onSelect: (Int) -> Void
+
+    private var showsCollocationCost: Bool {
+        candidates.contains { $0.collocationCost != 0 }
+    }
+
+    /// The axis is derived from the current candidates, so the graph remains
+    /// useful for both ordinary Mozc-sized costs and the maximum user-editable
+    /// cost without hiding the actual differences in a fixed range.
+    private var scaleMaximum: Int64 {
+        let observed = candidates.reduce(Int64(0)) { current, candidate in
+            let wordAndConnection = Int64(candidate.wordCost) + Int64(candidate.connectionCost)
+            let values = [
+                Int64(candidate.cost),
+                Int64(candidate.wordCost),
+                Int64(candidate.connectionCost),
+                wordAndConnection
+            ]
+            return max(current, values.max() ?? 0)
+        }
+        return Self.niceUpperBound(max(0, observed))
+    }
+
+    private var scaleMarks: [Int64] {
+        let midpoint = scaleMaximum / 2
+        return midpoint > 0
+            ? [0, midpoint, scaleMaximum]
+            : [0, scaleMaximum]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("変換候補")
+                    .font(.headline)
+                Spacer(minLength: 8)
+                Text("コストは小さいほど優先")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("候補ごとのコスト内訳")
+                    .font(.callout)
+                    .fontWeight(.medium)
+                Text(formulaText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 12) {
+                legendItem(
+                    color: .secondary,
+                    label: "合計（末端）",
+                    outlined: true
+                )
+                legendItem(color: .accentColor, label: "単語")
+                legendItem(color: Color(nsColor: .systemPurple), label: "接続")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    axisRow
+                    ForEach(candidates.indices, id: \.self) { index in
+                        CandidateCostGraphRow(
+                            index: index,
+                            candidate: candidates[index],
+                            isSelected: selectedCandidate == index,
+                            scaleMaximum: scaleMaximum,
+                            onSelect: { onSelect(index) }
+                        )
+                        .frame(height: Self.breakdownRowHeight)
+                    }
+                }
+            }
+            // Keep a stable five-row viewport. The reading field does not jump
+            // when a conversion changes the number of candidates.
+            .frame(
+                height: Self.breakdownRowHeight * CGFloat(Self.visibleRowCount)
+                    + Self.axisHeight
+            )
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var formulaText: String {
+        showsCollocationCost
+            ? "合計 = 単語 + 接続 + 共起（共起がない候補では 0）"
+            : "合計 = 単語 + 接続"
+    }
+
+    private var axisRow: some View {
+        GeometryReader { proxy in
+            let columns = CandidateGraphLayout.columns(in: proxy.size.width)
+            HStack(spacing: CandidateGraphLayout.columnSpacing) {
+                Text("候補")
+                    .frame(width: columns.label, alignment: .leading)
+
+                HStack(spacing: 0) {
+                    ForEach(Array(scaleMarks.enumerated()), id: \.offset) { index, mark in
+                        Text("\(mark)")
+                            .frame(maxWidth: .infinity, alignment: axisAlignment(for: index))
+                    }
+                }
+                .frame(width: columns.graph)
+
+                Text("合計")
+                    .frame(width: CandidateGraphLayout.totalColumnWidth, alignment: .trailing)
+            }
+            .padding(.horizontal, CandidateGraphLayout.horizontalPadding)
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .monospacedDigit()
+        .frame(height: Self.axisHeight)
+    }
+
+    private func axisAlignment(for index: Int) -> Alignment {
+        if index == 0 { return .leading }
+        if index == scaleMarks.count - 1 { return .trailing }
+        return .center
+    }
+
+    private func legendItem(color: Color, label: String, outlined: Bool = false) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(outlined ? Color.clear : color)
+                .overlay {
+                    if outlined {
+                        RoundedRectangle(cornerRadius: 2)
+                            .stroke(color, lineWidth: 1)
+                    }
+                }
+                .frame(width: 9, height: 9)
+            Text(label)
+        }
+    }
+
+    private static func niceUpperBound(_ value: Int64) -> Int64 {
+        guard value > 0 else { return 1 }
+        let magnitude = pow(10.0, floor(log10(Double(value))))
+        let normalized = Double(value) / magnitude
+        let nice: Double
+        switch normalized {
+        case ...1: nice = 1
+        case ...2: nice = 2
+        case ...5: nice = 5
+        default: nice = 10
+        }
+        return max(1, Int64(ceil(nice * magnitude)))
+    }
+}
+
+private struct CandidateCostGraphRow: View {
+    let index: Int
+    let candidate: Candidate
+    let isSelected: Bool
+    let scaleMaximum: Int64
+    let onSelect: () -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            let columns = CandidateGraphLayout.columns(in: proxy.size.width)
+            Button(action: onSelect) {
+                HStack(spacing: CandidateGraphLayout.columnSpacing) {
+                    HStack(spacing: 6) {
+                        Text("\(index + 1)")
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(width: 17, alignment: .trailing)
+                        Text(candidate.segments.map(\.surface).joined(separator: " · "))
+                            .fontWeight(isSelected ? .semibold : .regular)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .frame(width: columns.label, alignment: .leading)
+
+                    CandidateCostGraphBar(
+                        candidate: candidate,
+                        scaleMaximum: scaleMaximum
+                    )
+                    .frame(width: columns.graph)
+
+                    HStack(spacing: 3) {
+                        Text("合計")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("\(candidate.cost)")
+                            .font(.caption)
+                            .monospacedDigit()
+                    }
+                    .frame(width: CandidateGraphLayout.totalColumnWidth, alignment: .trailing)
+                }
+                .padding(.horizontal, CandidateGraphLayout.horizontalPadding)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .background(
+            isSelected
+                ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.25)
+                : Color.clear
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Capsule()
+                    .fill(Color.accentColor)
+                    .frame(width: 3)
+                    .padding(.vertical, 5)
+            }
+        }
+        .contentShape(Rectangle())
+        .help(costTooltip)
+        .accessibilityLabel(
+            Text(candidate.segments.map(\.surface).joined(separator: "、"))
+        )
+        .accessibilityValue(Text(accessibilityCost))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var accessibilityCost: String {
+        var text = "合計 \(candidate.cost)、単語 \(candidate.wordCost)、接続 \(candidate.connectionCost)"
+        if candidate.collocationCost != 0 {
+            text += "、共起 \(candidate.collocationCost)"
+        }
+        return text
+    }
+
+    private var costTooltip: String {
+        var text = "合計 \(candidate.cost) ＝ 単語 \(candidate.wordCost)"
+            + " ＋ 接続 \(candidate.connectionCost)"
+        if candidate.collocationCost != 0 {
+            text += " ＋ 共起 \(candidate.collocationCost)"
+        }
+        text += "（コストは小さいほど優先）"
+        return text
+    }
+}
+
+private struct CandidateCostGraphBar: View {
+    let candidate: Candidate
+    let scaleMaximum: Int64
+
+    private var wordColor: Color { .accentColor }
+    private var connectionColor: Color { Color(nsColor: .systemPurple) }
+
+    var body: some View {
+        GeometryReader { proxy in
+            breakdownBar(availableWidth: proxy.size.width)
+        }
+        .frame(height: 20)
+        .accessibilityHidden(true)
+    }
+
+    private func breakdownBar(availableWidth: CGFloat) -> some View {
+        let wordWidth = width(for: candidate.wordCost, available: availableWidth)
+        let connectionWidth = width(for: candidate.connectionCost, available: availableWidth)
+        let totalPosition = width(for: candidate.cost, available: availableWidth)
+
+        return ZStack(alignment: .leading) {
+            track(width: availableWidth, height: 18)
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(wordColor)
+                    .frame(width: wordWidth, height: 18)
+                Rectangle()
+                    .fill(connectionColor)
+                    .frame(width: connectionWidth, height: 18)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Rectangle()
+                .fill(Color.secondary)
+                .frame(width: 1, height: 20)
+                .offset(x: min(max(totalPosition, 0), max(availableWidth - 1, 0)))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func track(width: CGFloat, height: CGFloat) -> some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.secondary.opacity(0.10))
+            HStack(spacing: 0) {
+                ForEach(0..<5, id: \.self) { index in
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.14))
+                        .frame(width: 1)
+                    if index < 4 { Spacer(minLength: 0) }
+                }
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func width(for value: Int32, available: CGFloat) -> CGFloat {
+        guard scaleMaximum > 0, available > 0 else { return 0 }
+        let ratio = min(max(Double(value) / Double(scaleMaximum), 0), 1)
+        return available * ratio
     }
 }
 

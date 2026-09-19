@@ -151,7 +151,9 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     }
 
     /// Open the tuning window on whatever is being composed right now, so the
-    /// sentence that prompted the visit is already loaded.
+    /// sentence that prompted the visit is already loaded. If composition has
+    /// already been committed, the window supplies the latest conversion
+    /// reading remembered by the process.
     @objc private func openAdjustmentWindow(_ sender: Any?) {
         let seed = converting?.reading ?? (buffer.isEmpty ? nil : buffer.reading)
         let editor = ConversionService.shared.editor
@@ -298,6 +300,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         if Settings.liveConversion,
            let live = liveState, let best = live.candidates.first,
            reading.hasPrefix(live.reading) {
+            recordLastConversionReading(reading)
             output = best + reading.dropFirst(live.reading.count)
         }
         teardownComposing()
@@ -423,6 +426,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
 
     private func doCommit(conv: ConvertingState, client: Any?) {
         let text = conv.candidates[conv.selected]
+        recordLastConversionReading(conv.reading)
         converting = nil
         clearMarkedText(client: client)
         panelHide()
@@ -492,6 +496,16 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     // the main thread; every path into them here is already MainActor-isolated.
 
     private func resetBuffer() { buffer = InputBuffer() }
+
+    /// Keep this process-wide because IMK may replace the controller when the
+    /// focused client changes. The adjustment window is the shared owner of
+    /// this small piece of cross-client context.
+    private func recordLastConversionReading(_ reading: String) {
+        guard !reading.isEmpty else { return }
+        mainSync {
+            AdjustmentWindowController.recordLastConversion(reading: reading)
+        }
+    }
 
     private func updateMarkedText(client: Any?) {
         setMarked(composingDisplayString, client: client)

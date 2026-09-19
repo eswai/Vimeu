@@ -10,9 +10,16 @@ import VimeuEngine
 public final class AdjustmentWindowController: NSWindowController, NSWindowDelegate {
     public static let shared = AdjustmentWindowController()
 
+    /// The last reading that was actually committed through conversion. This
+    /// belongs to the process rather than to one IMK controller: IMK can create
+    /// a new controller when the client changes, while the tuning window is
+    /// shared by all of them.
+    private static var lastConversionReading: String?
+
     public let viewModel = AdjustmentViewModel()
     private var chrome: AdjustmentChrome?
     private var keyMonitor: Any?
+    private var skipNextFocusRefresh = false
 
     private init() {
         let window = NSWindow(
@@ -33,6 +40,14 @@ public final class AdjustmentWindowController: NSWindowController, NSWindowDeleg
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
+
+    /// Remember a committed conversion without creating the window. The IME
+    /// calls this for every completed conversion, but the window itself remains
+    /// lazy until the user opens it.
+    public static func recordLastConversion(reading: String) {
+        guard !reading.isEmpty else { return }
+        lastConversionReading = reading
+    }
 
     /// This process is a background input-method agent with no menu bar of its
     /// own, so ⌘V and friends are never routed to the field editor. Forward them
@@ -64,11 +79,17 @@ public final class AdjustmentWindowController: NSWindowController, NSWindowDeleg
         }
     }
 
-    /// Open the window, seeded with what the user is currently composing so the
-    /// sentence that prompted the visit is already there.
+    /// Open the window, seeded with what the user is currently composing. When
+    /// there is no active composition, show the reading from the last committed
+    /// conversion instead.
     public func open(editor: DictionaryEditor?, reading: String?) {
         if viewModel.editor !== editor { viewModel.editor = editor }
-        viewModel.show(reading: reading)
+        // Keep the active composition as the more immediate context. The next
+        // key-window notification would otherwise replace it before the user
+        // can inspect it.
+        let wasKeyWindow = window?.isKeyWindow == true
+        skipNextFocusRefresh = reading != nil && !wasKeyWindow
+        viewModel.show(reading: reading ?? Self.lastConversionReading)
         // The IME normally runs as an accessory app, which correctly keeps it
         // out of the Dock. While this document-style window is visible, make it
         // regular so its bundled icon can be used to select or reactivate it.
@@ -76,6 +97,19 @@ public final class AdjustmentWindowController: NSWindowController, NSWindowDeleg
         window?.makeKeyAndOrderFront(nil)
         // A background-only agent is not activated by ordering a window front.
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Dock activation and switching back from another app do not call `open`.
+    /// Refresh the field when the window receives focus so it still reflects
+    /// the latest conversion made since the previous visit.
+    public func windowDidBecomeKey(_ notification: Notification) {
+        if skipNextFocusRefresh {
+            skipNextFocusRefresh = false
+            return
+        }
+        guard let reading = Self.lastConversionReading,
+              viewModel.reading != reading else { return }
+        viewModel.show(reading: reading)
     }
 
     /// Return the input method to its normal agent presentation once there is

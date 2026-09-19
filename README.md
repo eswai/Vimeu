@@ -5,8 +5,7 @@ macOS 向けのかな漢字変換 IME。**単一プロセスの純 Swift 実装*
 **Mozc の辞書と接続コスト行列をそのまま使い、変換コストの計算を Mozc と同一にする。**
 rewriter・予測変換・学習といった付加的な変換ロジックは持たない。
 
-前身の [shimei](../shimei) からはプロセス構成・UI・ローマ字入力・ユーザー辞書の骨格を引き継ぎ、
-変換方式（PMI 共起）と辞書フォーマットを作り直した。設計の詳細は [DESIGN.md](DESIGN.md)。
+プロセス構成、UI、ローマ字入力、辞書形式を含む設計の詳細は [DESIGN.md](DESIGN.md)。
 
 ## 特徴
 
@@ -20,14 +19,12 @@ rewriter・予測変換・学習といった付加的な変換ロジックは持
 
 ## 精度
 
-同一のテストセットで shimei と比較した実測値。vimeu は Mozc UT 辞書 490 万行を**使っていない**
-（理由は [DESIGN.md](DESIGN.md) §2.1）ことに注意。
+vimeu 自身を各テストセットに対して測定した実測値。Mozc UT 辞書は使っていない
+（理由と測定方法は [DESIGN.md](DESIGN.md) §2.1 / §3.6）。
 
 | | Wikipedia (13,804文) | 会話文 (11,542文) |
 |---|---|---|
-| shimei 文字精度 | 70.89% | 72.91% |
 | **vimeu 文字精度** | **84.47%** | **89.44%** |
-| shimei 文精度 | 27.27% | 16.43% |
 | **vimeu 文精度** | **34.63%** | **40.76%** |
 
 Mozc 自身の回帰データ（`data/dictionary_oss/evaluation.tsv` のうち Mozc が `OK:` と記録している
@@ -40,7 +37,8 @@ macOS 14 以降。ビルドには Swift 6.2 以降（Xcode コマンドライン
 ## 辞書データの用意
 
 必要なのは **Mozc の `src/data` ディレクトリのコピーだけ**で、前処理は要らない。
-使うのは次の 4 種で、すべてプレーンテキストである（Apache-2.0）。
+使うのは次の 4 種で、すべてプレーンテキストである。適用される条件は
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) に収録している。
 
 ```
 dictionary_oss/dictionary00..09.txt        読み・品詞ID・コスト・表層
@@ -218,7 +216,13 @@ IME プロセスはブレークポイントで止めるとデスクトップご�
 
 ## ライセンスと出典
 
-辞書データは [google/mozc](https://github.com/google/mozc)（Apache-2.0）の
+vimeu の独自コードは [BSD 3-Clause License](LICENSE) で公開する。
+
+辞書データは [google/mozc](https://github.com/google/mozc) の
 `src/data/dictionary_oss/` と `src/data/rules/boundary.def` に由来する。
+Mozc の Google 製コードは BSD 3-Clause License だが、`dictionary_oss` には
+NAIST IPAdic、ICOT Free Software、沖縄辞書由来データの個別条件も適用される。
 変換コストの計算は Mozc の `src/converter/immutable_converter.cc` を参照して実装した。
+著作権表示と適用条件の全文は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照すること。
+
 本プロジェクトは Google 日本語入力でも Mozc の公式配布物でもない。

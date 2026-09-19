@@ -78,6 +78,7 @@ assemble:
 	cp $(RES_DIR)/Info.plist        $(CONTENTS)/Info.plist
 	cp $(RES_DIR)/PkgInfo           $(CONTENTS)/PkgInfo
 	cp $(RES_DIR)/InfoPlist.strings $(RES_DIR)/MenuIcon.tiff $(RES_DIR)/AppIcon.icns $(RESOURCES)/
+	cp $(REPO_ROOT)/LICENSE $(REPO_ROOT)/THIRD_PARTY_NOTICES.md $(RESOURCES)/
 
 sign:
 	@echo "==> Signing $(APP_BUNDLE)$(if $(ENTITLEMENTS), (sandboxed),)"
@@ -88,7 +89,8 @@ sign:
 # input is handled locally and needs no dictionary. Fail loudly instead.
 verify-bundle:
 	@echo "==> Verifying $(APP_BUNDLE)"
-	@for f in $(MACOS_BIN)/$(APP_NAME) $(RESOURCES)/dict/vimeu.dic $(CONTENTS)/Info.plist; do \
+	@for f in $(MACOS_BIN)/$(APP_NAME) $(RESOURCES)/dict/vimeu.dic $(CONTENTS)/Info.plist \
+	          $(RESOURCES)/LICENSE $(RESOURCES)/THIRD_PARTY_NOTICES.md; do \
 		test -s "$$f" || { echo "ERROR: missing from bundle: $$f"; exit 1; }; \
 	done
 	@test "$$(/usr/libexec/PlistBuddy -c 'Print :InputMethodConnectionName' $(CONTENTS)/Info.plist)" \

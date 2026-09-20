@@ -1,6 +1,7 @@
 import Foundation
 import VimeuDict
 import VimeuEngine
+import VimeuNatural
 import VimeuUserDict
 import os.log
 
@@ -65,8 +66,10 @@ final class ConversionService: @unchecked Sendable {
         return editorStorage
     }
 
-    /// Convert now, on the calling thread. Used for the Space key, where the
-    /// user is waiting for the candidate window anyway.
+    /// Convert now, on the calling thread. Used by adjustment-window work and
+    /// other callers that already own their scheduling decision. The explicit
+    /// Space path uses `convert` below so the first Mozc candidate can arrive
+    /// without blocking InputMethodKit's event handling.
     ///
     /// A `Converter` is built per call rather than cached: it is a reference to
     /// the effective dictionary, which an edit in the tuning window replaces
@@ -120,7 +123,14 @@ final class LiveConversionCoordinator: @unchecked Sendable {
 
     init(service: ConversionService = .shared) {
         self.convert = { reading, completion in
-            service.convert(reading: reading, limit: 1, completion: completion)
+            // The first candidate remains Mozc's winner. The remaining nine
+            // are generated so the naturalness pass can start during live
+            // conversion and be reused if the user later presses Space.
+            service.convert(
+                reading: reading,
+                limit: NaturalCandidateFilter.maximumChecks,
+                completion: completion
+            )
         }
     }
 

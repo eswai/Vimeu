@@ -1,17 +1,34 @@
 import AppKit
 import Carbon.HIToolbox
 import InputMethodKit
+import os.log
 import VimeuEngine
 import VimeuInput
+import VimeuNatural
 import VimeuUI
 
 // MARK: - State
 
 /// Converting: a fixed list of whole-sentence candidates with one selected.
+/// The first stage keeps the panel hidden while the naturalness pass runs.
 private struct ConvertingState {
     var reading: String
     var candidates: [String]
     var selected: Int
+    /// The model-filtered list is held separately until the user asks to open
+    /// the candidate panel. This keeps the first Mozc candidate stable while
+    /// the asynchronous naturalness pass is running.
+    var filteredCandidates: [String]?
+    var panelRequested: Bool
+    var panelVisible: Bool
+}
+
+/// The engine may still be producing the initial list after the first Space.
+/// Keeping this state separate lets a second Space request the panel without
+/// starting a second conversion or losing the reading.
+private struct PendingExplicitConversion {
+    var reading: String
+    var panelRequested: Bool
 }
 
 /// Live conversion of the reading being composed, shown inline as marked text.
@@ -38,7 +55,17 @@ private enum KanaKind { case hiragana, katakana }
 final class VimeuInputController: IMKInputController, @unchecked Sendable {
     private var buffer = InputBuffer()
     private var converting: ConvertingState?
+    private var pendingExplicitConversion: PendingExplicitConversion?
     private var liveState: LiveState?
+    private var liveNaturalTask: Task<NaturalCandidateEvaluation, Never>?
+    private var liveNaturalCandidates: [String] = []
+
+    private static let explicitConversionLogger = Logger(
+        subsystem: "dev.vimeu.inputmethod",
+        category: "explicit-conversion"
+    )
+    private var explicitConversionStartedAt: UInt64?
+    private var explicitPanelRequestedAt: UInt64?
 
     /// Coalesces live-conversion work; results arrive on the main actor.
     private lazy var coordinator: LiveConversionCoordinator = {
@@ -49,11 +76,18 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         return c
     }()
 
-    /// Ask for every candidate the n-best search can enumerate. The search has
-    /// its own expansion safety valve because the number of lattice paths can
-    /// be exponential; using the same value here removes the former UI-only
-    /// nine-candidate truncation without weakening that guard.
-    private static let candidateLimit = NBest.maxExpansions
+    /// Space conversion is filtered by the on-device model without blocking
+    /// InputMethodKit's main-thread event handling.
+    private lazy var explicitConversionCoordinator: ExplicitConversionCoordinator = {
+        let c = ExplicitConversionCoordinator()
+        c.onInitialResult = { [weak self] candidates, reading in
+            self?.handleExplicitInitialResult(candidates: candidates, reading: reading)
+        }
+        c.onResult = { [weak self] candidates, reading in
+            self?.handleExplicitFilteredResult(candidates: candidates, reading: reading)
+        }
+        return c
+    }()
 
     /// ASCII punctuation typed directly maps to Japanese punctuation.
     private static let punctuation: [Character: String] = [
@@ -166,6 +200,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         // raw kana rather than leaving a stale one on screen.
         if !Settings.liveConversion {
             liveState = nil
+            resetLiveNaturalness()
             coordinator.reset()
             updateMarkedText(client: client())
         }
@@ -195,6 +230,9 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
 
         if converting != nil {
             return handleConverting(event: event, client: sender)
+        }
+        if pendingExplicitConversion != nil {
+            return handlePendingExplicitConversion(event: event, client: sender)
         }
         if !buffer.isEmpty {
             return handleComposing(event: event, client: sender)
@@ -275,6 +313,13 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// is off. The pending romaji fragment is never sent — the engine only ever
     /// sees finished kana.
     private func submitLive() {
+        // Any new input abandons a Space conversion that is still waiting for
+        // the language model. Its late response must not replace newer text.
+        pendingExplicitConversion = nil
+        explicitConversionCoordinator.reset()
+        explicitConversionStartedAt = nil
+        explicitPanelRequestedAt = nil
+        resetLiveNaturalness()
         guard Settings.liveConversion else { return }
         coordinator.submit(reading: buffer.reading, delayMilliseconds: LiveConversionSettings.delayMilliseconds)
     }
@@ -284,8 +329,36 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     private func handleLiveResult(candidates: [Candidate], reading: String) {
         guard Settings.liveConversion, converting == nil else { return }
         guard buffer.reading == reading else { return }  // stale
-        liveState = LiveState(reading: reading, candidates: candidates.map(\.text))
+        let texts = candidates.map(\.text)
+        liveState = LiveState(reading: reading, candidates: texts)
         updateMarkedText(client: client())
+        beginLiveNaturalness(candidates: texts)
+    }
+
+    /// Start evaluating the live Mozc prefix without changing what is shown.
+    /// The task is retained so a later Space can await and reuse the same pass.
+    private func beginLiveNaturalness(candidates: [String]) {
+        resetLiveNaturalness()
+        let texts = Array(candidates.prefix(NaturalCandidateFilter.maximumChecks))
+        guard !texts.isEmpty else { return }
+        liveNaturalCandidates = texts
+        Self.explicitConversionLogger.info(
+            "live_llm_start candidate_count=\(texts.count, privacy: .public)"
+        )
+        liveNaturalTask = Task.detached(priority: .utility) {
+            let evaluation = await FoundationModelsCandidateFilter().evaluate(texts)
+            guard !Task.isCancelled else { return evaluation }
+            Self.explicitConversionLogger.info(
+                "live_llm_complete candidate_count=\(texts.count, privacy: .public)"
+            )
+            return evaluation
+        }
+    }
+
+    private func resetLiveNaturalness() {
+        liveNaturalTask?.cancel()
+        liveNaturalTask = nil
+        liveNaturalCandidates = []
     }
 
     /// Commit the composition exactly as displayed: the live conversion plus any
@@ -316,48 +389,210 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
 
     private func teardownComposing() {
         resetBuffer()
+        pendingExplicitConversion = nil
         liveState = nil
+        resetLiveNaturalness()
         coordinator.reset()
+        explicitConversionCoordinator.reset()
+        explicitConversionStartedAt = nil
+        explicitPanelRequestedAt = nil
     }
 
     // MARK: - Converting
 
-    /// Space: convert and show the candidate window.
+    /// Space: request explicit candidate selection.
     ///
-    /// Runs the engine synchronously — the user pressed a key and is waiting for
-    /// the window, and a conversion costs a few milliseconds. (Live conversion,
-    /// which runs on every keystroke, goes through the background queue instead.)
-    /// If the dictionary is unavailable the kana forms still let the user commit
-    /// something rather than losing the input.
+    /// With live conversion enabled, Space means the user wants an alternative:
+    /// open the panel as soon as the full list and the already-running live LLM
+    /// pass are both ready. Without live conversion, the first Space still only
+    /// shows Mozc's winner and the second Space requests the panel.
     private func startConverting(client: Any?) -> Bool {
         let reading = buffer.flushForConversion()
         guard !reading.isEmpty else { return false }
-        teardownComposing()
 
-        var candidates = ConversionService.shared
-            .convertNow(reading: reading, limit: Self.candidateLimit)
-            .map(\.text)
-        if candidates.isEmpty { candidates = [reading] }
-        // Always offer the plain kana forms as a fallback at the end of the list.
-        for kana in [reading, Self.hiraganaToKatakana(reading)]
-        where !candidates.contains(kana) {
-            candidates.append(kana)
+        var filterOverride: ExplicitConversionCoordinator.Filter?
+        if let live = liveState, live.reading == reading {
+            if liveNaturalTask == nil || live.candidates != liveNaturalCandidates {
+                beginLiveNaturalness(candidates: live.candidates)
+            }
+            if let task = liveNaturalTask {
+                let evaluatedPrefix = liveNaturalCandidates
+                filterOverride = { candidates in
+                    let evaluation = await task.value
+                    guard Array(candidates.prefix(evaluatedPrefix.count)) == evaluatedPrefix else {
+                        return await FoundationModelsCandidateFilter().filter(candidates)
+                    }
+                    return evaluation.applying(to: candidates)
+                }
+            }
+        } else {
+            resetLiveNaturalness()
         }
 
-        enterConverting(reading: reading, candidates: candidates, selected: 0, client: client)
+        let panelRequested = Settings.liveConversion
+        liveState = nil
+        coordinator.reset()
+        panelHide()
+        pendingExplicitConversion = PendingExplicitConversion(
+            reading: reading,
+            panelRequested: panelRequested
+        )
+        explicitConversionStartedAt = DispatchTime.now().uptimeNanoseconds
+        explicitPanelRequestedAt = panelRequested
+            ? DispatchTime.now().uptimeNanoseconds
+            : nil
+        explicitConversionCoordinator.submit(
+            reading: reading,
+            fallbackCandidates: [reading, Self.hiraganaToKatakana(reading)],
+            filterOverride: filterOverride
+        )
+        updateMarkedText(client: client)
         return true
     }
 
-    private func enterConverting(reading: String, candidates: [String], selected: Int, client: Any?) {
-        converting = ConvertingState(reading: reading, candidates: candidates, selected: selected)
+    /// Handles keys pressed after the first Space but before the dictionary
+    /// callback has produced the initial candidate list. There is no candidate
+    /// to select yet, so Enter/other input commits the raw reading; a second
+    /// Space only records the request to show the panel later.
+    private func handlePendingExplicitConversion(event: NSEvent, client: Any?) -> Bool {
+        guard var pending = pendingExplicitConversion else { return false }
+
+        switch Int(event.keyCode) {
+        case kVK_Space:
+            let wasRequested = pending.panelRequested
+            pending.panelRequested = true
+            pendingExplicitConversion = pending
+            if !wasRequested {
+                explicitPanelRequestedAt = DispatchTime.now().uptimeNanoseconds
+            }
+            return true
+
+        case kVK_Escape, kVK_Delete:
+            // Conversion has already been requested; rewind to the same
+            // reading and let the user edit it again.
+            explicitConversionCoordinator.reset()
+            pendingExplicitConversion = nil
+            explicitConversionStartedAt = nil
+            explicitPanelRequestedAt = nil
+            liveState = nil
+            resetLiveNaturalness()
+            updateMarkedText(client: client)
+            return true
+
+        case kVK_Return:
+            commitCurrentComposition(client: client)
+            return true
+
+        default:
+            // No hidden candidate exists yet. Commit the reading and let the
+            // key be interpreted as the next input, matching the hidden
+            // candidate behavior below.
+            commitCurrentComposition(client: client)
+            if let ch = event.characters?.first {
+                if ch.isLetter {
+                    buffer.accept(Character(ch.lowercased()))
+                    submitLive()
+                    updateMarkedText(client: client)
+                    return true
+                }
+                if ch == "-" {
+                    buffer.acceptKana("ー")
+                    submitLive()
+                    updateMarkedText(client: client)
+                    return true
+                }
+                if let punct = Self.punctuation[ch] {
+                    buffer.acceptKana(punct)
+                    submitLive()
+                    updateMarkedText(client: client)
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
+    @MainActor
+    private func handleExplicitInitialResult(candidates: [String], reading: String) {
+        guard converting == nil,
+              let pending = pendingExplicitConversion,
+              pending.reading == reading,
+              buffer.reading == reading,
+              !candidates.isEmpty else { return }
+
+        let elapsed = elapsedMilliseconds(since: explicitConversionStartedAt)
+        Self.explicitConversionLogger.info(
+            "mozc_first_ready_ms=\(elapsed, privacy: .public) candidate_count=\(candidates.count, privacy: .public)"
+        )
+        Self.explicitConversionLogger.info(
+            "llm_start candidate_count=\(min(candidates.count, NaturalCandidateFilter.maximumChecks), privacy: .public)"
+        )
+
+        // The model task must survive this transition. Clearing the composing
+        // buffer is safe because the conversion state owns the reading now.
+        resetBuffer()
+        liveState = nil
+        pendingExplicitConversion = nil
+        converting = ConvertingState(
+            reading: reading,
+            candidates: candidates,
+            selected: 0,
+            filteredCandidates: nil,
+            panelRequested: pending.panelRequested,
+            panelVisible: false
+        )
+        updateMarkedText(with: candidates[0], client: client())
+    }
+
+    @MainActor
+    private func handleExplicitFilteredResult(candidates: [String], reading: String) {
+        guard var conv = converting,
+              conv.reading == reading,
+              !candidates.isEmpty else { return }
+
+        let elapsed = elapsedMilliseconds(since: explicitConversionStartedAt)
+        Self.explicitConversionLogger.info(
+            "llm_complete_ms=\(elapsed, privacy: .public) candidate_count=\(candidates.count, privacy: .public)"
+        )
+        resetLiveNaturalness()
+        conv.filteredCandidates = candidates
+        if conv.panelRequested {
+            showCandidatePanel(using: candidates, for: &conv, client: client())
+        } else {
+            converting = conv
+        }
+    }
+
+    private func enterConverting(
+        reading: String,
+        candidates: [String],
+        selected: Int,
+        client: Any?,
+        panelVisible: Bool = true
+    ) {
+        converting = ConvertingState(
+            reading: reading,
+            candidates: candidates,
+            selected: selected,
+            filteredCandidates: nil,
+            panelRequested: panelVisible,
+            panelVisible: panelVisible
+        )
         // Set the marked text first: the caret rectangle we anchor to is only
         // meaningful once the client has the composing text.
         updateMarkedText(with: candidates[selected], client: client)
-        panelShow(candidates, selected: selected, anchor: caretRect(client: client))
+        if panelVisible {
+            panelShow(candidates, selected: selected, anchor: caretRect(client: client))
+        }
     }
 
     private func handleConverting(event: NSEvent, client: Any?) -> Bool {
         guard var conv = converting else { return false }
+
+        if !conv.panelVisible {
+            return handleHiddenConverting(event: event, conv: conv, client: client)
+        }
+
         let count = conv.candidates.count
 
         switch Int(event.keyCode) {
@@ -416,6 +651,86 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         }
     }
 
+    /// Handles the first-stage conversion where only Mozc's current winner is
+    /// shown inline. Space is the sole key that requests the candidate list;
+    /// other keys commit that winner or rewind the conversion.
+    private func handleHiddenConverting(
+        event: NSEvent,
+        conv: ConvertingState,
+        client: Any?
+    ) -> Bool {
+        switch Int(event.keyCode) {
+        case kVK_Space:
+            requestCandidatePanel(for: conv, client: client)
+            return true
+
+        case kVK_Return:
+            doCommit(conv: conv, client: client)
+            return true
+
+        case kVK_Delete, kVK_Escape:
+            revertToComposing(conv: conv, client: client)
+            return true
+
+        default:
+            doCommit(conv: conv, client: client)
+            if let ch = event.characters?.first {
+                if ch.isLetter {
+                    buffer.accept(Character(ch.lowercased()))
+                    submitLive()
+                    updateMarkedText(client: client)
+                    return true
+                }
+                if ch == "-" {
+                    buffer.acceptKana("ー")
+                    submitLive()
+                    updateMarkedText(client: client)
+                    return true
+                }
+                if let punct = Self.punctuation[ch] {
+                    buffer.acceptKana(punct)
+                    submitLive()
+                    updateMarkedText(client: client)
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
+    private func requestCandidatePanel(for conv: ConvertingState, client: Any?) {
+        var updated = conv
+        updated.panelRequested = true
+        if explicitPanelRequestedAt == nil {
+            explicitPanelRequestedAt = DispatchTime.now().uptimeNanoseconds
+        }
+        if let filtered = updated.filteredCandidates {
+            showCandidatePanel(using: filtered, for: &updated, client: client)
+        } else {
+            converting = updated
+        }
+    }
+
+    private func showCandidatePanel(
+        using candidates: [String],
+        for conv: inout ConvertingState,
+        client: Any?
+    ) {
+        guard !candidates.isEmpty else { return }
+        conv.candidates = candidates
+        conv.selected = 0
+        conv.panelRequested = true
+        conv.panelVisible = true
+        converting = conv
+        updateMarkedText(with: candidates[0], client: client)
+        panelShow(candidates, selected: 0, anchor: caretRect(client: client))
+
+        let wait = elapsedMilliseconds(since: explicitPanelRequestedAt)
+        Self.explicitConversionLogger.info(
+            "candidate_panel_visible_ms_after_request=\(wait, privacy: .public) candidate_count=\(candidates.count, privacy: .public)"
+        )
+    }
+
     private func updateConvertingSelection(_ conv: ConvertingState, client: Any?) {
         converting = conv
         updateMarkedText(with: conv.candidates[conv.selected], client: client)
@@ -428,6 +743,11 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         let text = conv.candidates[conv.selected]
         recordLastConversionReading(conv.reading)
         converting = nil
+        pendingExplicitConversion = nil
+        resetLiveNaturalness()
+        explicitConversionCoordinator.reset()
+        explicitConversionStartedAt = nil
+        explicitPanelRequestedAt = nil
         clearMarkedText(client: client)
         panelHide()
         insertText(text, client: client)
@@ -435,6 +755,11 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
 
     private func doCancel(conv: ConvertingState, client: Any?) {
         converting = nil
+        pendingExplicitConversion = nil
+        resetLiveNaturalness()
+        explicitConversionCoordinator.reset()
+        explicitConversionStartedAt = nil
+        explicitPanelRequestedAt = nil
         clearMarkedText(client: client)
         panelHide()
     }
@@ -443,6 +768,11 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// reading so the user doesn't have to retype it.
     private func revertToComposing(conv: ConvertingState, client: Any?) {
         converting = nil
+        pendingExplicitConversion = nil
+        resetLiveNaturalness()
+        explicitConversionCoordinator.reset()
+        explicitConversionStartedAt = nil
+        explicitPanelRequestedAt = nil
         panelHide()
         buffer = InputBuffer()
         buffer.reading = conv.reading
@@ -586,5 +916,12 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             && rect.size.width.isFinite && rect.size.height.isFinite
             && abs(rect.origin.x) < 1_000_000 && abs(rect.origin.y) < 1_000_000
             && rect.size.height >= 0
+    }
+
+    private func elapsedMilliseconds(since start: UInt64?) -> Double {
+        guard let start else { return -1 }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now >= start else { return 0 }
+        return Double(now - start) / 1_000_000
     }
 }

@@ -74,4 +74,91 @@ struct LiveConversionCoordinatorTests {
         #expect(results == ["あ"])
     }
 
+    @Test func explicitConversionPublishesMozcBeforeNaturalResult() async throws {
+        let candidate = Candidate(
+            text: "Mozc候補",
+            cost: 0,
+            wordCost: 0,
+            connectionCost: 0,
+            segments: [],
+            boundaries: []
+        )
+        var initial: [String] = []
+        var filtered: [String] = []
+        let coordinator = ExplicitConversionCoordinator(
+            convert: { reading, completion in
+                completion([candidate], reading)
+            },
+            filter: { _ in
+                try? await Task.sleep(for: .milliseconds(30))
+                return ["自然候補", "Mozc候補"]
+            }
+        )
+        coordinator.onInitialResult = { candidates, _ in initial = candidates }
+        coordinator.onResult = { candidates, _ in filtered = candidates }
+
+        coordinator.submit(reading: "もずく", fallbackCandidates: ["もずく"])
+
+        #expect(initial == ["Mozc候補", "もずく"])
+        #expect(filtered.isEmpty)
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(filtered == ["自然候補", "Mozc候補"])
+    }
+
+    @Test func explicitConversionResetRejectsLateNaturalResult() async throws {
+        let candidate = Candidate(
+            text: "Mozc候補",
+            cost: 0,
+            wordCost: 0,
+            connectionCost: 0,
+            segments: [],
+            boundaries: []
+        )
+        var filteredCount = 0
+        let coordinator = ExplicitConversionCoordinator(
+            convert: { reading, completion in
+                completion([candidate], reading)
+            },
+            filter: { _ in
+                try? await Task.sleep(for: .milliseconds(30))
+                return ["自然候補"]
+            }
+        )
+        coordinator.onResult = { _, _ in filteredCount += 1 }
+
+        coordinator.submit(reading: "もずく", fallbackCandidates: [])
+        coordinator.reset()
+        try await Task.sleep(for: .milliseconds(80))
+
+        #expect(filteredCount == 0)
+    }
+
+    @Test func explicitConversionCanReuseAStartedFilter() async throws {
+        let candidate = Candidate(
+            text: "Mozc候補",
+            cost: 0,
+            wordCost: 0,
+            connectionCost: 0,
+            segments: [],
+            boundaries: []
+        )
+        var filtered: [String] = []
+        let coordinator = ExplicitConversionCoordinator(
+            convert: { reading, completion in
+                completion([candidate], reading)
+            },
+            filter: { _ in ["再実行された候補"] }
+        )
+        coordinator.onResult = { candidates, _ in filtered = candidates }
+
+        coordinator.submit(
+            reading: "もずく",
+            fallbackCandidates: [],
+            filterOverride: { candidates in ["先行判定"] + candidates }
+        )
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(filtered == ["先行判定", "Mozc候補"])
+    }
+
 }

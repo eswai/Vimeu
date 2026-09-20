@@ -1,6 +1,7 @@
 import XCTest
 import VimeuDict
 import VimeuEngine
+import VimeuNatural
 import VimeuUserDict
 @testable import VimeuUI
 
@@ -23,7 +24,7 @@ final class CandidateViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testAdjustmentWordsUseCandidatesBeyondTheFormerNineItemLimit() throws {
+    func testAdjustmentWordsUseCandidatesBeyondTheFormerNineItemLimit() async throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -45,10 +46,20 @@ final class CandidateViewModelTests: XCTestCase {
             .convert(reading: "はし", limit: NBest.maxExpansions)
         try XCTSkipUnless(expectedCandidates.count > 9, "test reading has too few candidates")
 
-        let model = AdjustmentViewModel()
+        let model = AdjustmentViewModel { _ in
+            NaturalCandidateEvaluation(
+                acceptedIndex: 2,
+                unnaturalIndices: [0, 1],
+                completedWithoutError: true
+            )
+        }
         model.editor = editor
         model.reading = "はし"
         model.reconvert()
+
+        for _ in 0..<20 where model.unnaturalCandidateIndices != [0, 1] {
+            await Task.yield()
+        }
 
         XCTAssertEqual(model.candidates.map(\.text), expectedCandidates.map(\.text))
         XCTAssertEqual(
@@ -59,6 +70,8 @@ final class CandidateViewModelTests: XCTestCase {
             model.selectedCandidateWordIDs,
             Set(expectedCandidates[0].segments.map { $0.reading + "\t" + $0.surface })
         )
+        XCTAssertEqual(model.unnaturalCandidateIndices, [0, 1])
+        XCTAssertEqual(model.naturalCandidateIndex, 2)
         var expectedJumpIDs: [String] = []
         for segment in expectedCandidates[0].segments {
             let id = segment.reading + "\t" + segment.surface

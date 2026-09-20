@@ -1,5 +1,6 @@
 import Foundation
 import VimeuEngine
+import VimeuNatural
 import VimeuUserDict
 
 /// State behind the tuning window.
@@ -27,6 +28,10 @@ public final class AdjustmentViewModel: ObservableObject {
     @Published public var tab: Tab = .words
     @Published public var reading: String = ""
     @Published public private(set) var candidates: [Candidate] = []
+    /// Candidate rows rejected by the same top-down LLM pass used by the IME.
+    @Published public private(set) var unnaturalCandidateIndices: Set<Int> = []
+    /// The first candidate accepted by the LLM, if the pass found one.
+    @Published public private(set) var naturalCandidateIndex: Int?
     @Published public private(set) var words: [WordKnob] = []
     @Published public private(set) var message: String?
 
@@ -42,12 +47,25 @@ public final class AdjustmentViewModel: ObservableObject {
     /// path, so that pane needs a selection.
     @Published public var selectedCandidate: Int = 0
 
+    public typealias EvaluateNaturalCandidates =
+        @Sendable ([String]) async -> NaturalCandidateEvaluation
+
+    private let evaluateNaturalCandidates: EvaluateNaturalCandidates
+    private var naturalnessTask: Task<Void, Never>?
+    private var naturalnessGeneration: UInt64 = 0
+
     /// Nil until the dictionary has been opened; the window then shows why.
     public var editor: DictionaryEditor? {
         didSet { reconvert() }
     }
 
-    public init() {}
+    public init(
+        evaluateNaturalCandidates: @escaping EvaluateNaturalCandidates = { candidates in
+            await FoundationModelsCandidateFilter().evaluate(candidates)
+        }
+    ) {
+        self.evaluateNaturalCandidates = evaluateNaturalCandidates
+    }
 
     /// Surfaces listed more than once in `words`.
     ///
@@ -92,6 +110,7 @@ public final class AdjustmentViewModel: ObservableObject {
     }
 
     public func reconvert() {
+        resetNaturalnessEvaluation()
         guard let editor else {
             candidates = []
             words = []
@@ -138,6 +157,32 @@ public final class AdjustmentViewModel: ObservableObject {
         }
         if !collocationChoices.contains(collocationRight) {
             collocationRight = collocationChoices.dropFirst().first ?? ""
+        }
+        evaluateCurrentCandidates()
+    }
+
+    private func resetNaturalnessEvaluation() {
+        naturalnessGeneration &+= 1
+        naturalnessTask?.cancel()
+        naturalnessTask = nil
+        unnaturalCandidateIndices = []
+        naturalCandidateIndex = nil
+    }
+
+    private func evaluateCurrentCandidates() {
+        guard !candidates.isEmpty else { return }
+        let texts = candidates.prefix(NaturalCandidateFilter.maximumChecks).map(\.text)
+        let submittedGeneration = naturalnessGeneration
+        let evaluate = evaluateNaturalCandidates
+
+        naturalnessTask = Task { @MainActor [weak self] in
+            let result = await evaluate(texts)
+            guard let self,
+                  !Task.isCancelled,
+                  submittedGeneration == self.naturalnessGeneration else { return }
+            self.naturalnessTask = nil
+            self.unnaturalCandidateIndices = Set(result.unnaturalIndices)
+            self.naturalCandidateIndex = result.acceptedIndex
         }
     }
 

@@ -32,10 +32,14 @@ let package = Package(
         .target(name: "VimeuInput"),
 
         // ── macOS layer ─────────────────────────────────────────────────────
+        // Apple Foundation Models naturalness judgment shared by the IME and
+        // the adjustment window. It never changes conversion costs or ranking.
+        .target(name: "VimeuNatural"),
+
         // Candidate panel. MainActor by default: every AppKit touch is main-thread.
         .target(
             name: "VimeuUI",
-            dependencies: ["VimeuEngine", "VimeuUserDict", "VimeuInput"],
+            dependencies: ["VimeuEngine", "VimeuUserDict", "VimeuInput", "VimeuNatural"],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
 
@@ -48,7 +52,7 @@ let package = Package(
         // (see MainSync.swift).
         .executableTarget(
             name: "VimeuIME",
-            dependencies: ["VimeuEngine", "VimeuInput", "VimeuUI"],
+            dependencies: ["VimeuEngine", "VimeuInput", "VimeuUI", "VimeuNatural"],
             linkerSettings: [
                 .linkedFramework("InputMethodKit"),
                 .linkedFramework("AppKit"),
@@ -76,10 +80,13 @@ let package = Package(
         .testTarget(name: "VimeuEngineTests", dependencies: ["VimeuEngine"]),
         .testTarget(name: "VimeuUserDictTests", dependencies: ["VimeuUserDict"]),
         .testTarget(name: "VimeuInputTests", dependencies: ["VimeuInput"]),
+        .testTarget(name: "VimeuNaturalTests", dependencies: ["VimeuNatural"]),
         .testTarget(name: "VimeuIMETests", dependencies: ["VimeuIME"]),
         .testTarget(
             name: "VimeuUITests",
-            dependencies: ["VimeuUI", "VimeuDict", "VimeuEngine", "VimeuUserDict"]
+            dependencies: [
+                "VimeuUI", "VimeuDict", "VimeuEngine", "VimeuNatural", "VimeuUserDict"
+            ]
         ),
     ]
 )

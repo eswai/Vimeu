@@ -95,6 +95,8 @@ public struct AdjustmentView: View {
             } else {
                 CandidateCostGraph(
                     candidates: model.candidates,
+                    unnaturalCandidateIndices: model.unnaturalCandidateIndices,
+                    naturalCandidateIndex: model.naturalCandidateIndex,
                     selectedCandidate: model.selectedCandidate,
                     onSelect: selectCandidateAndRequestWordJump
                 )
@@ -493,6 +495,8 @@ private struct CandidateCostGraph: View {
     private static let breakdownRowHeight: CGFloat = 30
 
     let candidates: [Candidate]
+    let unnaturalCandidateIndices: Set<Int>
+    let naturalCandidateIndex: Int?
     let selectedCandidate: Int
     let onSelect: (Int) -> Void
 
@@ -552,6 +556,14 @@ private struct CandidateCostGraph: View {
                 )
                 legendItem(color: .accentColor, label: "単語")
                 legendItem(color: Color(nsColor: .systemPurple), label: "接続")
+                if !unnaturalCandidateIndices.isEmpty {
+                    Text("赤字: LLMで明らかに不自然")
+                        .foregroundStyle(.red)
+                }
+                if naturalCandidateIndex != nil {
+                    Text("緑字: LLMで自然")
+                        .foregroundStyle(.green)
+                }
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -563,6 +575,8 @@ private struct CandidateCostGraph: View {
                         CandidateCostGraphRow(
                             index: index,
                             candidate: candidates[index],
+                            isUnnatural: unnaturalCandidateIndices.contains(index),
+                            isNatural: naturalCandidateIndex == index,
                             isSelected: selectedCandidate == index,
                             scaleMaximum: scaleMaximum,
                             onSelect: { onSelect(index) }
@@ -652,6 +666,8 @@ private struct CandidateCostGraph: View {
 private struct CandidateCostGraphRow: View {
     let index: Int
     let candidate: Candidate
+    let isUnnatural: Bool
+    let isNatural: Bool
     let isSelected: Bool
     let scaleMaximum: Int64
     let onSelect: () -> Void
@@ -669,6 +685,7 @@ private struct CandidateCostGraphRow: View {
                             .frame(width: 17, alignment: .trailing)
                         Text(candidate.segments.map(\.surface).joined(separator: " · "))
                             .fontWeight(isSelected ? .semibold : .regular)
+                            .foregroundStyle(candidateTextColor)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
@@ -723,6 +740,11 @@ private struct CandidateCostGraphRow: View {
         if candidate.collocationCost != 0 {
             text += "、共起 \(candidate.collocationCost)"
         }
+        if isUnnatural {
+            text += "、LLM判定 明らかに不自然"
+        } else if isNatural {
+            text += "、LLM判定 自然"
+        }
         return text
     }
 
@@ -732,8 +754,19 @@ private struct CandidateCostGraphRow: View {
         if candidate.collocationCost != 0 {
             text += " ＋ 共起 \(candidate.collocationCost)"
         }
+        if isUnnatural {
+            text += "、LLM判定: 明らかに不自然"
+        } else if isNatural {
+            text += "、LLM判定: 自然"
+        }
         text += "（コストは小さいほど優先）"
         return text
+    }
+
+    private var candidateTextColor: Color {
+        if isUnnatural { return .red }
+        if isNatural { return .green }
+        return .primary
     }
 }
 

@@ -43,6 +43,29 @@ struct LiveConversionCoordinatorTests {
         #expect(readings == ["あ", "あい"])
     }
 
+    @Test func unchangedReadingKeepsTheRunningConversion() {
+        var readings: [String] = []
+        var finish: (@MainActor ([Candidate], String) -> Void)?
+        var results: [String] = []
+        let coordinator = LiveConversionCoordinator { reading, completion in
+            readings.append(reading)
+            finish = completion
+        }
+        coordinator.onResult = { _, reading in results.append(reading) }
+        let candidate = Candidate(
+            text: "蚊", cost: 0, wordCost: 0, connectionCost: 0,
+            segments: [], boundaries: []
+        )
+
+        coordinator.submit(reading: "か")
+        // A pending consonant changed, but the completed kana did not.
+        coordinator.submit(reading: "か")
+        finish?([candidate], "か")
+
+        #expect(readings == ["か"])
+        #expect(results == ["か"])
+    }
+
     @Test func elapsedDelayWaitsForRunningConversion() async throws {
         var readings: [String] = []
         var finish: (@MainActor ([Candidate], String) -> Void)?

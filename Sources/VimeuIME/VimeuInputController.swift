@@ -319,8 +319,18 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         explicitConversionCoordinator.reset()
         explicitConversionStartedAt = nil
         explicitPanelRequestedAt = nil
+        guard Settings.liveConversion else {
+            resetLiveNaturalness()
+            return
+        }
+
+        // A pending romaji fragment can change while the completed kana does
+        // not (for example, typing the "k" in "ka"). The marked text still
+        // gets refreshed by the caller, but Mozc and the model would receive
+        // exactly the same input, so retain their result and in-flight pass.
+        guard liveState?.reading != buffer.reading else { return }
+
         resetLiveNaturalness()
-        guard Settings.liveConversion else { return }
         coordinator.submit(reading: buffer.reading, delayMilliseconds: LiveConversionSettings.delayMilliseconds)
     }
 
@@ -418,10 +428,15 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             if let task = liveNaturalTask {
                 let evaluatedPrefix = liveNaturalCandidates
                 filterOverride = { candidates in
-                    let evaluation = await task.value
                     guard Array(candidates.prefix(evaluatedPrefix.count)) == evaluatedPrefix else {
+                        // The full Space conversion already tells us whether
+                        // its prefix can reuse the live pass. Do not wait for
+                        // an unusable model response before starting the pass
+                        // for the candidates that will actually be displayed.
+                        task.cancel()
                         return await FoundationModelsCandidateFilter().filter(candidates)
                     }
+                    let evaluation = await task.value
                     return evaluation.applying(to: candidates)
                 }
             }

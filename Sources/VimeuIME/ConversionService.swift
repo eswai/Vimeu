@@ -113,6 +113,8 @@ final class LiveConversionCoordinator: @unchecked Sendable {
     private let convert: Convert
     private var latestReading = ""
     private var inFlight = false
+    private var inFlightReading = ""
+    private var inFlightGeneration: UInt64 = 0
     private var generation: UInt64 = 0
     private var ready = false
     private var timer: DispatchWorkItem?
@@ -139,6 +141,15 @@ final class LiveConversionCoordinator: @unchecked Sendable {
     }
 
     func submit(reading: String, delayMilliseconds: Int = 0) {
+        // Pending romaji may change without changing the completed kana. If
+        // that kana is already being converted for the current generation,
+        // its result is exactly the result this request would compute.
+        if inFlight,
+           inFlightGeneration == generation,
+           inFlightReading == reading {
+            return
+        }
+
         reset()
         latestReading = reading
         guard !reading.isEmpty else { return }
@@ -173,9 +184,12 @@ final class LiveConversionCoordinator: @unchecked Sendable {
         let submittedGeneration = generation
         ready = false
         inFlight = true
+        inFlightReading = reading
+        inFlightGeneration = submittedGeneration
         convert(reading) { [weak self] candidates, converted in
             guard let self else { return }
             self.inFlight = false
+            self.inFlightReading = ""
             if submittedGeneration == self.generation, !candidates.isEmpty {
                 self.onResult?(candidates, converted)
             }

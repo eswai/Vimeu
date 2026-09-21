@@ -445,7 +445,10 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         }
 
         let panelRequested = Settings.liveConversion
-        liveState = nil
+        // Keep the live result until the first explicit-conversion result
+        // arrives. `updateMarkedText` below is synchronous, so clearing it
+        // here would briefly replace the visible conversion with raw kana
+        // while the candidate list is being generated.
         coordinator.reset()
         panelHide()
         pendingExplicitConversion = PendingExplicitConversion(
@@ -864,12 +867,13 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// the inline text from flickering between kanji and hiragana on every
     /// keystroke.
     private var composingDisplayString: String {
-        if Settings.liveConversion,
-           let live = liveState, let best = live.candidates.first,
-           buffer.reading.hasPrefix(live.reading) {
-            return best + buffer.reading.dropFirst(live.reading.count) + buffer.converter.pending
-        }
-        return buffer.displayString
+        ComposingDisplay.text(
+            liveConversionEnabled: Settings.liveConversion,
+            reading: buffer.reading,
+            pendingRomaji: buffer.converter.pending,
+            liveReading: liveState?.reading,
+            liveText: liveState?.candidates.first
+        )
     }
 
     private func updateMarkedText(with text: String, client: Any?) {

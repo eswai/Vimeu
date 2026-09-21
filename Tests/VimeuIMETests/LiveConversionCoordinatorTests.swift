@@ -5,6 +5,10 @@ import VimeuEngine
 
 @MainActor
 struct LiveConversionCoordinatorTests {
+    @Test func hyphenMapsToLongVowelMark() {
+        #expect(VimeuInputController.punctuation["-"] == "ー")
+    }
+
     @Test func idleDelayRestartsForUnchangedReading() async throws {
         var readings: [String] = []
         let coordinator = LiveConversionCoordinator { reading, _ in readings.append(reading) }

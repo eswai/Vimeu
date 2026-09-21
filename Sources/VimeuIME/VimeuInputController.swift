@@ -56,10 +56,11 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     private static let candidateLimit = NBest.maxExpansions
 
     /// ASCII punctuation typed directly maps to Japanese punctuation.
-    private static let punctuation: [Character: String] = [
+    static let punctuation: [Character: String] = [
         ",": "、",
         ".": "。",
         "/": "・",
+        "-": "ー",
     ]
 
     /// One panel for the whole process, shared by every controller instance
@@ -248,12 +249,6 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             if let ch = event.characters?.first {
                 if ch.isLetter {
                     buffer.accept(Character(ch.lowercased()))
-                    submitLive()
-                    updateMarkedText(client: client)
-                    return true
-                }
-                if ch == "-" {
-                    buffer.acceptKana("ー")
                     submitLive()
                     updateMarkedText(client: client)
                     return true

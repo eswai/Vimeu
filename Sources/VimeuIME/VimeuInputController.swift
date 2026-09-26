@@ -39,6 +39,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     private var buffer = InputBuffer()
     private var converting: ConvertingState?
     private var liveState: LiveState?
+    private var autoCommitWork: DispatchWorkItem?
 
     /// Coalesces live-conversion work; results arrive on the main actor.
     private lazy var coordinator: LiveConversionCoordinator = {
@@ -166,6 +167,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         // Turning it off mid-composition drops the inline conversion back to
         // raw kana rather than leaving a stale one on screen.
         if !Settings.liveConversion {
+            cancelAutoCommit()
             liveState = nil
             coordinator.reset()
             updateMarkedText(client: client())
@@ -270,6 +272,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// is off. The pending romaji fragment is never sent — the engine only ever
     /// sees finished kana.
     private func submitLive() {
+        cancelAutoCommit()
         guard Settings.liveConversion else { return }
         coordinator.submit(reading: buffer.reading, delayMilliseconds: LiveConversionSettings.delayMilliseconds)
     }
@@ -281,6 +284,37 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         guard buffer.reading == reading else { return }  // stale
         liveState = LiveState(reading: reading, candidates: candidates.map(\.text))
         updateMarkedText(client: client())
+        scheduleAutoCommit(reading: reading)
+    }
+
+    private func cancelAutoCommit() {
+        autoCommitWork?.cancel()
+        autoCommitWork = nil
+    }
+
+    /// Start counting only after the converted text is visible. A new key or
+    /// explicit candidate selection cancels this work before it can commit.
+    private func scheduleAutoCommit(reading: String) {
+        cancelAutoCommit()
+        guard Settings.liveConversion, LiveConversionSettings.autoCommitEnabled,
+              liveState?.candidates.first != nil,
+              buffer.converter.pending.isEmpty else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self,
+                  Settings.liveConversion,
+                  LiveConversionSettings.autoCommitEnabled,
+                  self.converting == nil,
+                  self.buffer.reading == reading,
+                  self.buffer.converter.pending.isEmpty,
+                  self.liveState?.reading == reading,
+                  let client = self.client() else { return }
+            self.commitCurrentComposition(client: client)
+        }
+        autoCommitWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + .milliseconds(LiveConversionSettings.autoCommitDelayMilliseconds),
+            execute: work
+        )
     }
 
     /// Commit the composition exactly as displayed: the live conversion plus any
@@ -310,6 +344,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     }
 
     private func teardownComposing() {
+        cancelAutoCommit()
         resetBuffer()
         liveState = nil
         coordinator.reset()
@@ -325,6 +360,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// If the dictionary is unavailable the kana forms still let the user commit
     /// something rather than losing the input.
     private func startConverting(client: Any?) -> Bool {
+        cancelAutoCommit()
         let reading = buffer.flushForConversion()
         guard !reading.isEmpty else { return false }
         teardownComposing()

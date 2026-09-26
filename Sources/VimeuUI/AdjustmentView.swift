@@ -1137,9 +1137,14 @@ private struct AddWordSheet: View {
 
 private struct LiveConversionSettingsView: View {
     @AppStorage(LiveConversionSettings.delayKey) private var delay = LiveConversionSettings.defaultDelay
+    @AppStorage(LiveConversionSettings.autoCommitEnabledKey) private var autoCommitEnabled = false
+    @AppStorage(LiveConversionSettings.autoCommitDelayKey) private var autoCommitDelay = LiveConversionSettings.defaultAutoCommitDelay
     @State private var text = ""
     @State private var invalid = false
+    @State private var autoCommitText = ""
+    @State private var autoCommitInvalid = false
     @FocusState private var focused: Bool
+    @FocusState private var autoCommitFocused: Bool
 
     var body: some View {
         Form {
@@ -1162,10 +1167,42 @@ private struct LiveConversionSettingsView: View {
                         .foregroundStyle(.red)
                 }
             }
+            Section("自動確定") {
+                Toggle("変換後に自動で確定する", isOn: $autoCommitEnabled)
+                HStack {
+                    Text("変換された文字列の表示から")
+                    TextField("確定までの時間", text: $autoCommitText)
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.trailing)
+                        .monospacedDigit()
+                        .frame(width: 100)
+                        .focused($autoCommitFocused)
+                        .onSubmit(commitAutoCommitDelay)
+                        .onChange(of: autoCommitFocused) { _, value in
+                            if !value { commitAutoCommitDelay() }
+                        }
+                    Text("ms 後に確定")
+                }
+                .disabled(!autoCommitEnabled)
+                if autoCommitInvalid {
+                    Text("100〜60000 の整数を入力してください。設定は変更されていません。")
+                        .foregroundStyle(.red)
+                }
+                Text("入力が続くと待ち時間をやり直します。候補の選択中は自動確定しません。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
-        .onAppear { text = String(LiveConversionSettings.clamp(delay)) }
-        .onDisappear { commit() }
+        .onAppear {
+            text = String(LiveConversionSettings.clamp(delay))
+            autoCommitText = String(LiveConversionSettings.clampAutoCommitDelay(autoCommitDelay))
+        }
+        .onDisappear {
+            commit()
+            commitAutoCommitDelay()
+        }
     }
 
     private func commit() {
@@ -1177,5 +1214,16 @@ private struct LiveConversionSettingsView: View {
         delay = value
         text = String(value)
         invalid = false
+    }
+
+    private func commitAutoCommitDelay() {
+        guard let value = Int(autoCommitText.trimmingCharacters(in: .whitespaces)),
+              LiveConversionSettings.autoCommitDelayRange.contains(value) else {
+            autoCommitInvalid = true
+            return
+        }
+        autoCommitDelay = value
+        autoCommitText = String(value)
+        autoCommitInvalid = false
     }
 }

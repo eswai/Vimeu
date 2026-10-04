@@ -179,10 +179,16 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard event.type == .keyDown else { return false }
 
-        // Control+J / Control+K: force the current reading to hiragana / katakana.
+        // Control+M commits like Return (also sent by Ishizuki before Unicode
+        // insertion). With no composition, leave the shortcut to the client.
+        // Control+J / Control+K force the reading to hiragana / katakana.
         let mods = event.modifierFlags
         if mods.contains(.control), !mods.contains(.command) {
             switch Int(event.keyCode) {
+            case kVK_ANSI_M:
+                guard converting != nil || !buffer.isEmpty else { return false }
+                endSession(client: sender, commit: true)
+                return true
             case kVK_ANSI_J: return handleKanaConversion(kind: .hiragana, client: sender)
             case kVK_ANSI_K: return handleKanaConversion(kind: .katakana, client: sender)
             default: break

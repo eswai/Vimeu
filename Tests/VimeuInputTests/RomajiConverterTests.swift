@@ -77,6 +77,29 @@ final class RomajiConverterTests: XCTestCase {
 }
 
 final class InputBufferTests: XCTestCase {
+    func testDigitsAreCompletedInput() {
+        var buffer = InputBuffer()
+        for ch in "0123456789" {
+            XCTAssertTrue(InputBuffer.isComposingCharacter(ch))
+            buffer.accept(ch)
+        }
+        XCTAssertEqual(buffer.reading, "0123456789")
+        XCTAssertTrue(buffer.converter.pending.isEmpty)
+        XCTAssertEqual(buffer.flushForConversion(), "0123456789")
+        buffer.deleteLast()
+        XCTAssertEqual(buffer.displayString, "012345678")
+        XCTAssertFalse(InputBuffer.isComposingCharacter(" "))
+        XCTAssertFalse(InputBuffer.isComposingCharacter("!"))
+    }
+
+    func testDigitsKeepKanaInTheSameComposition() {
+        XCTAssertEqual(typeAndFlush("123nen"), "123ねん")
+        XCTAssertEqual(typeAndFlush("reiwa8nen"), "れいわ8ねん")
+        XCTAssertEqual(type("n1").reading, "ん1")
+        XCTAssertEqual(type("n1").pending, "")
+        XCTAssertEqual(typeAndFlush("k1a"), "k1あ")
+    }
+
     func testIsEmpty() {
         var buffer = InputBuffer()
         XCTAssertTrue(buffer.isEmpty)

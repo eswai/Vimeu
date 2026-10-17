@@ -9,6 +9,24 @@ struct LiveConversionCoordinatorTests {
         #expect(VimeuInputController.punctuation["-"] == "ー")
     }
 
+    @Test func numberWidthCandidatesAreAvailableWithoutDictionary() {
+        #expect(VimeuInputController.conversionCandidates(
+            reading: "0123456789", converted: []
+        ) == ["0123456789", "０１２３４５６７８９"])
+    }
+
+    @Test func numberWidthChoicesPreserveConvertedKanaAndLeadingZeros() {
+        #expect(VimeuInputController.conversionCandidates(
+            reading: "01ねん", converted: ["01年", "01ねん"]
+        ) == ["01年", "０１年", "01ねん", "０１ねん", "01ネン", "０１ネン"])
+    }
+
+    @Test func widthChoicesDoNotChangeKanaOnlyCandidates() {
+        #expect(VimeuInputController.conversionCandidates(
+            reading: "はし", converted: ["橋", "箸", "はし", "ハシ"]
+        ) == ["橋", "箸", "はし", "ハシ"])
+    }
+
     @Test func idleDelayRestartsForUnchangedReading() async throws {
         var readings: [String] = []
         let coordinator = LiveConversionCoordinator { reading, _ in readings.append(reading) }

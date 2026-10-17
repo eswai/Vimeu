@@ -98,6 +98,16 @@ final class ConverterTests: XCTestCase {
         XCTAssertEqual(Converter(dictionary: dic).best(reading: "ぬぬぬ"), "ぬぬぬ")
     }
 
+    func testDigitsPassThroughAlongsideConvertedKana() throws {
+        let dic = try makeDictionary([("ねん", "年", 1000, 1, 1)])
+        let converter = Converter(dictionary: dic)
+        XCTAssertEqual(converter.best(reading: "0123"), "0123")
+        let candidate = try XCTUnwrap(converter.convert(reading: "123ねん", limit: 1).first)
+        XCTAssertEqual(candidate.text, "123年")
+        XCTAssertEqual(candidate.segments.map(\.reading).joined(), "123ねん")
+        XCTAssertEqual(candidate.cost, candidate.wordCost + candidate.connectionCost)
+    }
+
     func testEmptyReadingConvertsToNothing() throws {
         let dic = try makeDictionary([("あ", "亜", 1000, 1, 1)])
         XCTAssertEqual(Converter(dictionary: dic).convert(reading: "").count, 0)

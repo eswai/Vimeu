@@ -1,6 +1,6 @@
 import Foundation
 
-// Accumulated input buffer: hiragana so far + pending roman chars.
+// Accumulated input buffer: kana / digits so far + pending roman chars.
 public struct InputBuffer {
     public var reading: String = ""
     public var converter = RomajiConverter()
@@ -14,7 +14,20 @@ public struct InputBuffer {
 
     // Feed one character.
     public mutating func accept(_ ch: Character) {
-        reading += converter.accept(ch)
+        if Self.isASCIIDigit(ch) {
+            // A number ends the pending syllable: n1 → ん1, never n1.
+            acceptKana(String(ch))
+        } else {
+            reading += converter.accept(ch)
+        }
+    }
+
+    public static func isASCIIDigit(_ ch: Character) -> Bool {
+        ch >= "0" && ch <= "9"
+    }
+
+    public static func isComposingCharacter(_ ch: Character) -> Bool {
+        ch.isLetter || isASCIIDigit(ch)
     }
 
     // Directly append a kana character (e.g. ー from the minus key).

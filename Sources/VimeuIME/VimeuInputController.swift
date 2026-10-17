@@ -221,7 +221,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             updateMarkedText(client: client)
             return true
         }
-        guard ch.isLetter else { return false }
+        guard InputBuffer.isComposingCharacter(ch) else { return false }
         buffer.accept(Character(ch.lowercased()))
         submitLive()
         updateMarkedText(client: client)
@@ -255,7 +255,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
 
         default:
             if let ch = event.characters?.first {
-                if ch.isLetter {
+                if InputBuffer.isComposingCharacter(ch) {
                     buffer.accept(Character(ch.lowercased()))
                     submitLive()
                     updateMarkedText(client: client)
@@ -268,7 +268,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
                     return true
                 }
             }
-            // Non-alpha key: commit what we have, then pass the key through.
+            // Other keys: commit what we have, then pass the key through.
             commitCurrentComposition(client: client)
             return false
         }
@@ -371,18 +371,33 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         guard !reading.isEmpty else { return false }
         teardownComposing()
 
-        var candidates = ConversionService.shared
+        let converted = ConversionService.shared
             .convertNow(reading: reading, limit: Self.candidateLimit)
             .map(\.text)
-        if candidates.isEmpty { candidates = [reading] }
-        // Always offer the plain kana forms as a fallback at the end of the list.
-        for kana in [reading, Self.hiraganaToKatakana(reading)]
-        where !candidates.contains(kana) {
-            candidates.append(kana)
-        }
+        let candidates = Self.conversionCandidates(reading: reading, converted: converted)
 
         enterConverting(reading: reading, candidates: candidates, selected: 0, client: client)
         return true
+    }
+
+    /// Width choices are UI alternatives, like the plain kana fallback. Keep
+    /// the engine's ordering and costs, and place each full-width form directly
+    /// after its original so it remains reachable in a long candidate list.
+    static func conversionCandidates(reading: String, converted: [String]) -> [String] {
+        var candidates: [String] = []
+        var seen: Set<String> = []
+        for text in converted + [reading, hiraganaToKatakana(reading)] {
+            let fullWidth = String(String.UnicodeScalarView(text.unicodeScalars.map { scalar in
+                if scalar.value >= 0x30, scalar.value <= 0x39 {
+                    return Unicode.Scalar(scalar.value + 0xFEE0)!
+                }
+                return scalar
+            }))
+            for form in [text, fullWidth] where seen.insert(form).inserted {
+                candidates.append(form)
+            }
+        }
+        return candidates
     }
 
     private func enterConverting(reading: String, candidates: [String], selected: Int, client: Any?) {
@@ -430,8 +445,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
                     doCommit(conv: sel, client: client)
                     return true
                 }
-                // Letter or punctuation: commit, then start a new composition.
-                if ch.isLetter {
+                // Letter, unassigned digit or punctuation: start a new composition.
+                if InputBuffer.isComposingCharacter(ch) {
                     doCommit(conv: conv, client: client)
                     buffer.accept(Character(ch.lowercased()))
                     submitLive()

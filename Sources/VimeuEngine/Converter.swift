@@ -35,12 +35,13 @@ public struct Boundary: Sendable, Equatable, Identifiable {
     /// two boundaries of one candidate can be identical in every other field
     /// (`… の … の …`), so nothing else here identifies a row.
     public let index: Int
-    /// nil at the sentence start (BOS).
+    /// nil at the start of this reading (BOS or a committed left context).
     public let left: Segment?
     /// nil at the sentence end (EOS).
     public let right: Segment?
     /// POS ids actually used for the lookup: `left.rid` and `right.lid`, with 0
-    /// standing in for BOS/EOS.
+    /// standing in for BOS/EOS. The first `rid` may instead be the committed
+    /// previous word's POS when converting the remainder of a composition.
     public let rid: Int
     public let lid: Int
     public let cost: Int32
@@ -156,7 +157,9 @@ public final class Converter: Sendable {
     /// Distinct segmentations often produce the same string; those are collapsed
     /// so the candidate window never shows the same text twice. The ranking of
     /// what survives is unchanged.
-    public func convert(reading: String, limit: Int = 9) -> [Candidate] {
+    /// `previousRightID` is ephemeral context from the same loaded dictionary's
+    /// POS table. A continuation uses that transition and no new prefix penalty.
+    public func convert(reading: String, limit: Int = 9, previousRightID: Int? = nil) -> [Candidate] {
         let scalars = Array(reading.unicodeScalars)
         guard !scalars.isEmpty else { return [] }
 
@@ -164,8 +167,10 @@ public final class Converter: Sendable {
         let negativePairs = dictionary.negativeCollocations
 
         let codes = dictionary.encode(reading)
-        let lattice = Lattice.build(reading: scalars, codes: codes, dictionary: dictionary)
-        let viterbi = Viterbi.run(lattice: lattice, dictionary: dictionary)
+        let context = previousRightID.flatMap { (0..<dictionary.posCount).contains($0) ? $0 : nil }
+        let lattice = Lattice.build(reading: scalars, codes: codes, dictionary: dictionary,
+                                    isContinuation: context != nil)
+        let viterbi = Viterbi.run(lattice: lattice, dictionary: dictionary, initialRightID: context ?? 0)
         let searchExtension: NBest.Extension?
         if !negativePairs.isEmpty {
             // A forbidden path may be the Viterbi winner, so its cost cannot be
@@ -198,7 +203,7 @@ public final class Converter: Sendable {
         )
 
         let candidates = paths.map { path in
-            candidate(from: path, lattice: lattice, reading: scalars)
+            candidate(from: path, lattice: lattice, reading: scalars, initialRightID: context ?? 0)
         }
         guard !pairs.isEmpty || !negativePairs.isEmpty else { return candidates }
         return Array(
@@ -210,14 +215,14 @@ public final class Converter: Sendable {
     }
 
     /// Best conversion, or the reading unchanged when there is none.
-    public func best(reading: String) -> String {
-        convert(reading: reading, limit: 1).first?.text ?? reading
+    public func best(reading: String, previousRightID: Int? = nil) -> String {
+        convert(reading: reading, limit: 1, previousRightID: previousRightID).first?.text ?? reading
     }
 
     /// Turn a path into a candidate, recovering each node's reading from its
     /// span. Storing the reading on every lattice node instead would cost a
     /// string per node, of which a sentence generates thousands.
-    private func candidate(from path: NBest.Path, lattice: Lattice, reading: [Unicode.Scalar]) -> Candidate {
+    private func candidate(from path: NBest.Path, lattice: Lattice, reading: [Unicode.Scalar], initialRightID: Int) -> Candidate {
         var segments: [Segment] = []
         segments.reserveCapacity(path.nodes.count)
         var text = ""
@@ -242,7 +247,7 @@ public final class Converter: Sendable {
         var connectionCost: Int32 = 0
         var previous: Segment?
         for segment in segments {
-            let rid = previous?.rid ?? 0  // 0 = BOS
+            let rid = previous?.rid ?? initialRightID
             let cost = dictionary.transitionCost(rid, segment.lid)
             boundaries.append(Boundary(
                 index: boundaries.count,

@@ -45,7 +45,7 @@ public struct AdjustmentView: View {
                 case .words: wordsTab
                 case .collocations: collocationsTab
                 case .connections: connectionsTab
-                case .liveConversion: LiveConversionSettingsView()
+                case .liveConversion: InputSettingsView()
                 }
             }
             // Fills the rest of the window. Hugging the top instead left the
@@ -1135,20 +1135,81 @@ private struct AddWordSheet: View {
     }
 }
 
-private struct LiveConversionSettingsView: View {
+private struct InputSettingsView: View {
     @AppStorage(LiveConversionSettings.delayKey) private var delay = LiveConversionSettings.defaultDelay
     @AppStorage(LiveConversionSettings.autoCommitEnabledKey) private var autoCommitEnabled = false
     @AppStorage(LiveConversionSettings.autoCommitDelayKey) private var autoCommitDelay = LiveConversionSettings.defaultAutoCommitDelay
+    @AppStorage(PartialCommitSettings.enabledKey) private var partialCommitEnabled = true
+    @AppStorage(PartialCommitSettings.lengthKey) private var partialCommitLength = PartialCommitSettings.defaultLength
+    @AppStorage(PartialCommitSettings.modeKey) private var partialCommitMode = PartialCommitSettings.defaultMode.rawValue
+    @AppStorage(PartialCommitSettings.requiresStableCandidateKey) private var requiresStableCandidate = PartialCommitSettings.defaultRequiresStableCandidate
+    @AppStorage(PartialCommitSettings.stableLengthKey) private var stableLength = PartialCommitSettings.defaultStableLength
     @State private var text = ""
     @State private var invalid = false
     @State private var autoCommitText = ""
     @State private var autoCommitInvalid = false
+    @State private var partialCommitText = ""
+    @State private var partialCommitInvalid = false
+    @State private var stableLengthText = ""
+    @State private var stableLengthInvalid = false
     @FocusState private var focused: Bool
     @FocusState private var autoCommitFocused: Bool
+    @FocusState private var partialCommitFocused: Bool
+    @FocusState private var stableLengthFocused: Bool
 
     var body: some View {
         Form {
-            Section("変換を開始するタイミング") {
+            Section("長い入力の部分確定") {
+                Toggle("長くなった入力を先頭から確定する", isOn: $partialCommitEnabled)
+                HStack {
+                    Text("未確定の読みが")
+                    TextField("部分確定を始める文字数", text: $partialCommitText)
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.trailing)
+                        .monospacedDigit()
+                        .frame(width: 100)
+                        .focused($partialCommitFocused)
+                        .onSubmit(commitPartialCommitLength)
+                        .onChange(of: partialCommitFocused) { _, value in
+                            if !value { commitPartialCommitLength() }
+                        }
+                    Text("文字以上で確定を開始")
+                }
+                .disabled(!partialCommitEnabled)
+                if partialCommitInvalid {
+                    Text("2〜1000 の整数を入力してください。設定は変更されていません。")
+                        .foregroundStyle(.red)
+                }
+                Picker("ライブ変換オフ時", selection: $partialCommitMode) {
+                    Text("漢字変換して確定").tag(PartialCommitSettings.Mode.converted.rawValue)
+                    Text("ひらがなのまま確定").tag(PartialCommitSettings.Mode.reading.rawValue)
+                }
+                .disabled(!partialCommitEnabled)
+                Toggle("候補が変わらないことを確認してから確定する", isOn: $requiresStableCandidate)
+                    .disabled(!partialCommitEnabled)
+                HStack {
+                    Text("先頭の候補が変わらず、さらに")
+                    TextField("候補が変わらないまま入力する文字数", text: $stableLengthText)
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.trailing)
+                        .monospacedDigit()
+                        .frame(width: 80)
+                        .focused($stableLengthFocused)
+                        .onSubmit(commitStableLength)
+                        .onChange(of: stableLengthFocused) { _, value in
+                            if !value { commitStableLength() }
+                        }
+                    Text("文字以上入力したら確定")
+                }
+                .disabled(!partialCommitEnabled || !requiresStableCandidate)
+                if stableLengthInvalid {
+                    Text("1〜1000 の整数を入力してください。設定は変更されていません。")
+                        .foregroundStyle(.red)
+                }
+            }
+            Section("ライブ変換を開始するタイミング") {
                 HStack {
                     Text("キー入力を停止してから")
                     TextField("待ち時間", text: $text)
@@ -1167,7 +1228,7 @@ private struct LiveConversionSettingsView: View {
                         .foregroundStyle(.red)
                 }
             }
-            Section("自動確定") {
+            Section("入力停止後の自動確定（ライブ変換のみ）") {
                 Toggle("変換後に自動で確定する", isOn: $autoCommitEnabled)
                 HStack {
                     Text("変換された文字列の表示から")
@@ -1198,10 +1259,14 @@ private struct LiveConversionSettingsView: View {
         .onAppear {
             text = String(LiveConversionSettings.clamp(delay))
             autoCommitText = String(LiveConversionSettings.clampAutoCommitDelay(autoCommitDelay))
+            partialCommitText = String(PartialCommitSettings.clampLength(partialCommitLength))
+            stableLengthText = String(PartialCommitSettings.clampStableLength(stableLength))
         }
         .onDisappear {
             commit()
             commitAutoCommitDelay()
+            commitPartialCommitLength()
+            commitStableLength()
         }
     }
 
@@ -1225,5 +1290,27 @@ private struct LiveConversionSettingsView: View {
         autoCommitDelay = value
         autoCommitText = String(value)
         autoCommitInvalid = false
+    }
+
+    private func commitPartialCommitLength() {
+        guard let value = Int(partialCommitText.trimmingCharacters(in: .whitespaces)),
+              PartialCommitSettings.lengthRange.contains(value) else {
+            partialCommitInvalid = true
+            return
+        }
+        partialCommitLength = value
+        partialCommitText = String(value)
+        partialCommitInvalid = false
+    }
+
+    private func commitStableLength() {
+        guard let value = Int(stableLengthText.trimmingCharacters(in: .whitespaces)),
+              PartialCommitSettings.stableLengthRange.contains(value) else {
+            stableLengthInvalid = true
+            return
+        }
+        stableLength = value
+        stableLengthText = String(value)
+        stableLengthInvalid = false
     }
 }

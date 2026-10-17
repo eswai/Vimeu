@@ -29,7 +29,7 @@ struct LiveConversionCoordinatorTests {
 
     @Test func idleDelayRestartsForUnchangedReading() async throws {
         var readings: [String] = []
-        let coordinator = LiveConversionCoordinator { reading, _ in readings.append(reading) }
+        let coordinator = LiveConversionCoordinator { reading, _, _ in readings.append(reading) }
         coordinator.submit(reading: "か", delayMilliseconds: 150)
         try await Task.sleep(for: .milliseconds(80))
         // A pending consonant leaves the kana reading unchanged.
@@ -42,7 +42,7 @@ struct LiveConversionCoordinatorTests {
 
     @Test func resetCancelsTimer() async throws {
         var calls = 0
-        let coordinator = LiveConversionCoordinator { _, _ in calls += 1 }
+        let coordinator = LiveConversionCoordinator { _, _, _ in calls += 1 }
         coordinator.submit(reading: "あ", delayMilliseconds: 50)
         coordinator.reset()
         try await Task.sleep(for: .milliseconds(100))
@@ -52,7 +52,7 @@ struct LiveConversionCoordinatorTests {
     @Test func runningCompletionCannotBypassNewDelay() async throws {
         var readings: [String] = []
         var finish: (@MainActor ([Candidate], String) -> Void)?
-        let coordinator = LiveConversionCoordinator { reading, completion in
+        let coordinator = LiveConversionCoordinator { reading, _, completion in
             readings.append(reading)
             finish = completion
         }
@@ -68,7 +68,7 @@ struct LiveConversionCoordinatorTests {
     @Test func elapsedDelayWaitsForRunningConversion() async throws {
         var readings: [String] = []
         var finish: (@MainActor ([Candidate], String) -> Void)?
-        let coordinator = LiveConversionCoordinator { reading, completion in
+        let coordinator = LiveConversionCoordinator { reading, _, completion in
             readings.append(reading)
             finish = completion
         }
@@ -82,7 +82,7 @@ struct LiveConversionCoordinatorTests {
     @Test func resetRejectsOldResultEvenForSameReading() {
         var finish: (@MainActor ([Candidate], String) -> Void)?
         var results: [String] = []
-        let coordinator = LiveConversionCoordinator { _, completion in finish = completion }
+        let coordinator = LiveConversionCoordinator { _, _, completion in finish = completion }
         coordinator.onResult = { _, reading in results.append(reading) }
         let candidate = Candidate(text: "亜", cost: 0, wordCost: 0,
                                   connectionCost: 0, segments: [], boundaries: [])
@@ -94,6 +94,40 @@ struct LiveConversionCoordinatorTests {
         #expect(results.isEmpty)
         finish?([candidate], "あ")
         #expect(results == ["あ"])
+    }
+
+    @Test func missingDictionaryDeliversEmptyResultForCurrentReading() {
+        let coordinator = LiveConversionCoordinator { reading, _, completion in completion([], reading) }
+        var results: [String] = []
+        coordinator.onResult = { candidates, reading in
+            #expect(candidates.isEmpty)
+            results.append(reading)
+        }
+        let reading = String(repeating: "あ", count: 40)
+        coordinator.submit(reading: reading)
+        #expect(results == [reading])
+    }
+
+    @Test func contextChangeInvalidatesOldResultForIdenticalReading() {
+        var contexts: [Int?] = []
+        var finish: (@MainActor ([Candidate], String) -> Void)?
+        var results: [String] = []
+        let coordinator = LiveConversionCoordinator { _, context, completion in
+            contexts.append(context)
+            finish = completion
+        }
+        coordinator.onResult = { _, reading in results.append(reading) }
+        coordinator.submit(reading: "あ", previousRightID: 1)
+        let oldFinish = finish
+        coordinator.submit(reading: "あ", previousRightID: 2)
+        oldFinish?([], "あ")
+        #expect(results.isEmpty)
+        #expect(contexts == [1, 2])
+        finish?([], "あ")
+        #expect(results == ["あ"])
+        coordinator.reset()
+        coordinator.submit(reading: "あ")
+        #expect(contexts == [1, 2, nil])
     }
 
 }

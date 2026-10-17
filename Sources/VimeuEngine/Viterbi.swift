@@ -28,7 +28,7 @@ public struct Viterbi: Sendable {
     /// new cost gets computed *from* this value, so it has to leave headroom.
     public static let unreachable: Int32 = Int32.max >> 2
 
-    public static func run(lattice: Lattice, dictionary: DictionarySource) -> Viterbi {
+    public static func run(lattice: Lattice, dictionary: DictionarySource, initialRightID: Int = 0) -> Viterbi {
         let nodes = lattice.nodes
         var cost = [Int32](repeating: unreachable, count: nodes.count)
         var previous = [Int](repeating: -1, count: nodes.count)
@@ -56,7 +56,7 @@ public struct Viterbi: Sendable {
                 var best = unreachable
                 var bestFrom = -1
                 if position == 0 {
-                    best = dictionary.transitionCost(0, node.lid)  // from BOS
+                    best = dictionary.transitionCost(initialRightID, node.lid)
                 } else {
                     for leftIndex in lattice.endIndices[position] {
                         guard cost[leftIndex] < unreachable else { continue }

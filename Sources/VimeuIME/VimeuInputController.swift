@@ -12,6 +12,7 @@ private struct ConvertingState {
     var reading: String
     var candidates: [String]
     var selected: Int
+    var previousRightID: Int?
 }
 
 /// Live conversion of the reading being composed, shown inline as marked text.
@@ -40,12 +41,16 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     private var converting: ConvertingState?
     private var liveState: LiveState?
     private var autoCommitWork: DispatchWorkItem?
+    private var partialCommitStability = PartialCommitStability()
+    /// Valid only for the immutable POS table loaded for this process. Kept
+    /// within the current composition, never persisted or learned.
+    private var previousRightID: Int?
 
-    /// Coalesces live-conversion work; results arrive on the main actor.
+    /// Coalesces inline/partial-commit work; results arrive on the main actor.
     private lazy var coordinator: LiveConversionCoordinator = {
         let c = LiveConversionCoordinator()
         c.onResult = { [weak self] candidates, reading in
-            self?.handleLiveResult(candidates: candidates, reading: reading)
+            self?.handleConversionResult(candidates: candidates, reading: reading)
         }
         return c
     }()
@@ -164,14 +169,13 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
 
     @objc private func toggleLiveConversion(_ sender: Any?) {
         Settings.liveConversion.toggle()
-        // Turning it off mid-composition drops the inline conversion back to
-        // raw kana rather than leaving a stale one on screen.
-        if !Settings.liveConversion {
-            cancelAutoCommit()
-            liveState = nil
-            coordinator.reset()
-            updateMarkedText(client: client())
-        }
+        partialCommitStability.reset()
+        cancelAutoCommit()
+        liveState = nil
+        coordinator.reset()
+        guard converting == nil else { return }
+        submitConversion()
+        updateMarkedText(client: client())
     }
 
     // MARK: - Key dispatch
@@ -217,13 +221,13 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         guard let ch = event.characters?.first else { return false }
         if let punct = Self.punctuation[ch] {
             buffer.acceptKana(punct)
-            submitLive()
+            submitConversion()
             updateMarkedText(client: client)
             return true
         }
         guard InputBuffer.isComposingCharacter(ch) else { return false }
         buffer.accept(Character(ch.lowercased()))
-        submitLive()
+        submitConversion()
         updateMarkedText(client: client)
         return true
     }
@@ -240,11 +244,12 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             return true
 
         case kVK_Delete:
+            partialCommitStability.reset()
             buffer.deleteLast()
             if buffer.isEmpty {
                 clearComposing(client: client)
             } else {
-                submitLive()
+                submitConversion()
                 updateMarkedText(client: client)
             }
             return true
@@ -257,13 +262,13 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             if let ch = event.characters?.first {
                 if InputBuffer.isComposingCharacter(ch) {
                     buffer.accept(Character(ch.lowercased()))
-                    submitLive()
+                    submitConversion()
                     updateMarkedText(client: client)
                     return true
                 }
                 if let punct = Self.punctuation[ch] {
                     buffer.acceptKana(punct)
-                    submitLive()
+                    submitConversion()
                     updateMarkedText(client: client)
                     return true
                 }
@@ -274,20 +279,61 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         }
     }
 
-    /// Ask for a live conversion of the current reading. No-op when the feature
-    /// is off. The pending romaji fragment is never sent — the engine only ever
-    /// sees finished kana.
-    private func submitLive() {
+    /// Convert for inline display or to commit the prefix of a long reading.
+    /// Partial commits do not wait for the live-conversion idle delay. Pending
+    /// romaji stays in the buffer and is never sent to the engine.
+    private func submitConversion() {
         cancelAutoCommit()
-        guard Settings.liveConversion else { return }
-        coordinator.submit(reading: buffer.reading, delayMilliseconds: LiveConversionSettings.delayMilliseconds)
+        let settings = PartialCommitSettings.current
+        let partialCommitNeeded = settings.isNeeded(reading: buffer.reading)
+        if !settings.observesStability { partialCommitStability.reset() }
+        guard Settings.liveConversion || partialCommitNeeded || settings.observesStability else {
+            coordinator.reset()
+            return
+        }
+        coordinator.submit(
+            reading: buffer.reading,
+            delayMilliseconds: partialCommitNeeded || !Settings.liveConversion
+                ? 0 : LiveConversionSettings.delayMilliseconds,
+            previousRightID: previousRightID
+        )
     }
 
-    /// A live conversion came back: refresh the inline marked text.
+    /// A conversion came back: commit an old prefix, or refresh the inline text.
     @MainActor
-    private func handleLiveResult(candidates: [Candidate], reading: String) {
-        guard Settings.liveConversion, converting == nil else { return }
+    private func handleConversionResult(candidates: [Candidate], reading: String) {
+        guard converting == nil else { return }
         guard buffer.reading == reading else { return }  // stale
+        let settings = PartialCommitSettings.current
+        let stablePrefixScalarCount = partialCommitStability.observe(
+            reading: reading, candidate: candidates.first, settings: settings
+        )
+        if let boundaryRules = ConversionService.shared.boundaryRules,
+           let prefix = PartialCommit(boundaryRules: boundaryRules, reading: reading, candidate: candidates.first,
+                                      settings: settings, liveConversion: Settings.liveConversion,
+                                      stablePrefixScalarCount: stablePrefixScalarCount),
+           let client = client() {
+            cancelAutoCommit()
+            coordinator.reset()
+            partialCommitStability.reset()
+            // Replace the old marked range with just the committed prefix,
+            // then open a new marked range for the suffix, synchronously.
+            clearMarkedText(client: client)
+            insertText(prefix.text, client: client)
+            buffer.reading = prefix.remainingReading
+            previousRightID = prefix.previousRightID
+            // Keep the exact remainder of the displayed best path until its
+            // fresh conversion arrives. The pending syllable is untouched.
+            liveState = Settings.liveConversion && !candidates.isEmpty
+                ? LiveState(reading: prefix.remainingReading, candidates: [prefix.remainingText]) : nil
+            if !candidates.isEmpty, settings.converts(liveConversion: Settings.liveConversion) {
+                recordLastConversionReading(reading)
+            }
+            updateMarkedText(client: client)
+            submitConversion()
+            return
+        }
+        guard Settings.liveConversion else { return }
         liveState = LiveState(reading: reading, candidates: candidates.map(\.text))
         updateMarkedText(client: client())
         scheduleAutoCommit(reading: reading)
@@ -351,6 +397,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
 
     private func teardownComposing() {
         cancelAutoCommit()
+        partialCommitStability.reset()
+        previousRightID = nil
         resetBuffer()
         liveState = nil
         coordinator.reset()
@@ -369,14 +417,15 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         cancelAutoCommit()
         let reading = buffer.flushForConversion()
         guard !reading.isEmpty else { return false }
+        let context = previousRightID
         teardownComposing()
 
         let converted = ConversionService.shared
-            .convertNow(reading: reading, limit: Self.candidateLimit)
+            .convertNow(reading: reading, limit: Self.candidateLimit, previousRightID: context)
             .map(\.text)
         let candidates = Self.conversionCandidates(reading: reading, converted: converted)
 
-        enterConverting(reading: reading, candidates: candidates, selected: 0, client: client)
+        enterConverting(reading: reading, candidates: candidates, selected: 0, previousRightID: context, client: client)
         return true
     }
 
@@ -400,8 +449,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         return candidates
     }
 
-    private func enterConverting(reading: String, candidates: [String], selected: Int, client: Any?) {
-        converting = ConvertingState(reading: reading, candidates: candidates, selected: selected)
+    private func enterConverting(reading: String, candidates: [String], selected: Int, previousRightID: Int?, client: Any?) {
+        converting = ConvertingState(reading: reading, candidates: candidates, selected: selected, previousRightID: previousRightID)
         // Set the marked text first: the caret rectangle we anchor to is only
         // meaningful once the client has the composing text.
         updateMarkedText(with: candidates[selected], client: client)
@@ -449,14 +498,14 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
                 if InputBuffer.isComposingCharacter(ch) {
                     doCommit(conv: conv, client: client)
                     buffer.accept(Character(ch.lowercased()))
-                    submitLive()
+                    submitConversion()
                     updateMarkedText(client: client)
                     return true
                 }
                 if let punct = Self.punctuation[ch] {
                     doCommit(conv: conv, client: client)
                     buffer.acceptKana(punct)
-                    submitLive()
+                    submitConversion()
                     updateMarkedText(client: client)
                     return true
                 }
@@ -480,6 +529,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         let text = conv.candidates[conv.selected]
         recordLastConversionReading(conv.reading)
         converting = nil
+        teardownComposing()
         clearMarkedText(client: client)
         panelHide()
         insertText(text, client: client)
@@ -487,6 +537,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
 
     private func doCancel(conv: ConvertingState, client: Any?) {
         converting = nil
+        teardownComposing()
         clearMarkedText(client: client)
         panelHide()
     }
@@ -494,10 +545,12 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// Esc / backspace during conversion: rewind to Composing, keeping the
     /// reading so the user doesn't have to retype it.
     private func revertToComposing(conv: ConvertingState, client: Any?) {
+        partialCommitStability.reset()
         converting = nil
         panelHide()
         buffer = InputBuffer()
         buffer.reading = conv.reading
+        previousRightID = conv.previousRightID
         liveState = nil
         coordinator.reset()
         updateMarkedText(client: client)
@@ -509,10 +562,13 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// with both forms so the user can toggle and commit.
     private func handleKanaConversion(kind: KanaKind, client: Any?) -> Bool {
         let reading: String
+        let context: Int?
         if let conv = converting {
             reading = conv.reading
+            context = conv.previousRightID
         } else if !buffer.isEmpty {
             reading = buffer.flushForConversion()
+            context = previousRightID
         } else {
             return false  // nothing to convert; let the key pass through
         }
@@ -523,6 +579,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             reading: reading,
             candidates: [reading, Self.hiraganaToKatakana(reading)],
             selected: kind == .hiragana ? 0 : 1,
+            previousRightID: context,
             client: client
         )
         return true

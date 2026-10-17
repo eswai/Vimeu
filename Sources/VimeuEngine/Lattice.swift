@@ -42,6 +42,9 @@ public struct Lattice: Sendable {
 
     /// Build the lattice for a hiragana reading.
     ///
+    /// `isContinuation` omits the new-reading prefix penalty after a partial
+    /// commit; the unchanged suffix penalty still applies at the current end.
+    ///
     /// Positions are counted in **Unicode scalars**, not grapheme clusters, so
     /// that they line up with `codes` (which `DicReader.encode` produces one per
     /// scalar). Using `Character` here would silently desynchronise the two on
@@ -60,7 +63,8 @@ public struct Lattice: Sendable {
     public static func build(
         reading: [Unicode.Scalar],
         codes: [UInt8],
-        dictionary: DictionarySource
+        dictionary: DictionarySource,
+        isContinuation: Bool = false
     ) -> Lattice {
         let n = reading.count
         var nodes: [LatticeNode] = []
@@ -71,7 +75,7 @@ public struct Lattice: Sendable {
             let before = nodes.count
             dictionary.forEachToken(codes: codes, from: start) { length, surface, cost, lid, rid in
                 var wcost = cost
-                if start == 0 { wcost += dictionary.prefixPenalty(lid) }
+                if start == 0, !isContinuation { wcost += dictionary.prefixPenalty(lid) }
                 if start + length == n { wcost += dictionary.suffixPenalty(rid) }
                 nodes.append(LatticeNode(
                     begin: start, end: start + length,
@@ -80,7 +84,7 @@ public struct Lattice: Sendable {
             }
             let unknown = dictionary.unknownPOSID
             var unknownWCost = unknownCost
-            if start == 0 { unknownWCost += dictionary.prefixPenalty(unknown) }
+            if start == 0, !isContinuation { unknownWCost += dictionary.prefixPenalty(unknown) }
             if start + 1 == n { unknownWCost += dictionary.suffixPenalty(unknown) }
             nodes.append(LatticeNode(
                 begin: start, end: start + 1,

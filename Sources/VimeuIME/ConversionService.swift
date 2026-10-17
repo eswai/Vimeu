@@ -22,6 +22,7 @@ final class ConversionService: @unchecked Sendable {
     /// Owns the user's edits and hands out the effective dictionary. Nil until
     /// the bundled dictionary has been opened.
     private var editorStorage: DictionaryEditor?
+    private var boundaryRulesStorage: PartialCommitBoundaryRules?
     private var loadFailure: String?
 
     private init() {}
@@ -42,6 +43,7 @@ final class ConversionService: @unchecked Sendable {
             let dictionary = try DicReader(path: url.path)
             let store = UserDictionaryStore(directory: UserDictionaryStore.defaultDirectory())
             let editor = DictionaryEditor(system: dictionary, store: store)
+            boundaryRulesStorage = PartialCommitBoundaryRules(dictionary: dictionary)
             editorStorage = editor
             let stats = editor.dictionary.statistics
             logger.info("""
@@ -65,25 +67,32 @@ final class ConversionService: @unchecked Sendable {
         return editorStorage
     }
 
+    var boundaryRules: PartialCommitBoundaryRules? {
+        lock.lock()
+        defer { lock.unlock() }
+        return boundaryRulesStorage
+    }
+
     /// Convert now, on the calling thread. Used for the Space key, where the
     /// user is waiting for the candidate window anyway.
     ///
     /// A `Converter` is built per call rather than cached: it is a reference to
     /// the effective dictionary, which an edit in the tuning window replaces
     /// wholesale, and rebuilding it is how the next conversion picks the edit up.
-    func convertNow(reading: String, limit: Int) -> [Candidate] {
+    func convertNow(reading: String, limit: Int, previousRightID: Int? = nil) -> [Candidate] {
         guard let editor else { return [] }
-        return Converter(dictionary: editor.dictionary).convert(reading: reading, limit: limit)
+        return Converter(dictionary: editor.dictionary).convert(reading: reading, limit: limit, previousRightID: previousRightID)
     }
 
     /// Convert on the background queue and deliver the result on the main actor.
     func convert(
         reading: String,
         limit: Int,
+        previousRightID: Int? = nil,
         completion: @escaping @MainActor ([Candidate], String) -> Void
     ) {
         queue.async { [weak self] in
-            let candidates = self?.convertNow(reading: reading, limit: limit) ?? []
+            let candidates = self?.convertNow(reading: reading, limit: limit, previousRightID: previousRightID) ?? []
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { completion(candidates, reading) }
             }
@@ -91,7 +100,7 @@ final class ConversionService: @unchecked Sendable {
     }
 }
 
-/// Coalesces live-conversion requests so keystrokes never pile up.
+/// Coalesces inline/partial-commit conversion requests so keystrokes never pile up.
 ///
 /// Only one conversion runs at a time and only the newest reading is ever
 /// queued: typing faster than the engine simply skips intermediate readings
@@ -106,21 +115,23 @@ final class ConversionService: @unchecked Sendable {
 /// what the `@unchecked Sendable` stands on. It is needed because the result
 /// callback is handed across to the conversion queue and back.
 final class LiveConversionCoordinator: @unchecked Sendable {
-    typealias Convert = (String, @escaping @MainActor ([Candidate], String) -> Void) -> Void
+    typealias Convert = (String, Int?, @escaping @MainActor ([Candidate], String) -> Void) -> Void
     private let convert: Convert
     private var latestReading = ""
+    private var latestPreviousRightID: Int?
     private var inFlight = false
     private var generation: UInt64 = 0
     private var ready = false
     private var timer: DispatchWorkItem?
 
     /// Called on the main actor with (candidates, reading) for the newest
-    /// reading only.
+    /// reading only. Empty candidates restore the reading display when the
+    /// bundled dictionary could not be loaded; partial commit waits for a path.
     var onResult: (@MainActor ([Candidate], String) -> Void)?
 
     init(service: ConversionService = .shared) {
-        self.convert = { reading, completion in
-            service.convert(reading: reading, limit: 1, completion: completion)
+        self.convert = { reading, previousRightID, completion in
+            service.convert(reading: reading, limit: 1, previousRightID: previousRightID, completion: completion)
         }
     }
 
@@ -128,9 +139,10 @@ final class LiveConversionCoordinator: @unchecked Sendable {
         self.convert = convert
     }
 
-    func submit(reading: String, delayMilliseconds: Int = 0) {
+    func submit(reading: String, delayMilliseconds: Int = 0, previousRightID: Int? = nil) {
         reset()
         latestReading = reading
+        latestPreviousRightID = previousRightID
         guard !reading.isEmpty else { return }
         if delayMilliseconds <= 0 {
             ready = true
@@ -154,6 +166,7 @@ final class LiveConversionCoordinator: @unchecked Sendable {
         timer = nil
         generation &+= 1
         latestReading = ""
+        latestPreviousRightID = nil
         ready = false
     }
 
@@ -163,10 +176,10 @@ final class LiveConversionCoordinator: @unchecked Sendable {
         let submittedGeneration = generation
         ready = false
         inFlight = true
-        convert(reading) { [weak self] candidates, converted in
+        convert(reading, latestPreviousRightID) { [weak self] candidates, converted in
             guard let self else { return }
             self.inFlight = false
-            if submittedGeneration == self.generation, !candidates.isEmpty {
+            if submittedGeneration == self.generation {
                 self.onResult?(candidates, converted)
             }
             self.pumpIfIdle()

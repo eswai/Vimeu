@@ -1,7 +1,7 @@
 import Foundation
 
-/// Shared preferences for length-based prefix commits, independent of the
-/// live-conversion idle timer. A snapshot keeps each decision consistent.
+/// Shared preferences for length-based prefix commits. Automatic conversion
+/// uses the shared idle timer. A snapshot keeps each decision consistent.
 public struct PartialCommitSettings: Sendable, Equatable {
     public enum Mode: String, CaseIterable, Sendable {
         case converted

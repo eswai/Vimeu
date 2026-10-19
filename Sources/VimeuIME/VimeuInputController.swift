@@ -280,8 +280,9 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     }
 
     /// Convert for inline display or to commit the prefix of a long reading.
-    /// Partial commits do not wait for the live-conversion idle delay. Pending
-    /// romaji stays in the buffer and is never sent to the engine.
+    /// Inline conversion, stability observations, and partial commits share the
+    /// idle delay, even when live conversion is off. Pending romaji stays in
+    /// the buffer and is never sent to the engine.
     private func submitConversion() {
         cancelAutoCommit()
         let settings = PartialCommitSettings.current
@@ -293,8 +294,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         }
         coordinator.submit(
             reading: buffer.reading,
-            delayMilliseconds: partialCommitNeeded || !Settings.liveConversion
-                ? 0 : LiveConversionSettings.delayMilliseconds,
+            delayMilliseconds: LiveConversionSettings.delayMilliseconds,
             previousRightID: previousRightID
         )
     }

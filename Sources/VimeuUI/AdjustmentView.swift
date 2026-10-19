@@ -1209,7 +1209,7 @@ private struct InputSettingsView: View {
                         .foregroundStyle(.red)
                 }
             }
-            Section("ライブ変換を開始するタイミング") {
+            Section("自動変換・部分確定を開始するまでの待ち時間") {
                 HStack {
                     Text("キー入力を停止してから")
                     TextField("待ち時間", text: $text)
@@ -1227,6 +1227,9 @@ private struct InputSettingsView: View {
                     Text("0〜60000 の整数を入力してください。設定は変更されていません。")
                         .foregroundStyle(.red)
                 }
+                Text("入力するたびに待ち時間をやり直します。ライブ変換がオフでも、部分確定と候補の安定確認に適用します。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             Section("入力停止後の自動確定（ライブ変換のみ）") {
                 Toggle("変換後に自動で確定する", isOn: $autoCommitEnabled)

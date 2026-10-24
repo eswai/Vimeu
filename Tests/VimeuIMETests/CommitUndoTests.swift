@@ -73,4 +73,24 @@ struct ReconversionTests {
         undo.record(text: "東京", reading: "とうきょう", previousRightID: 7)
         #expect(undo.entry == CommitUndo.Entry(text: "東京", reading: "とうきょう", previousRightID: 7))
     }
+
+    @Test func chromiumClientsDeleteThenMark() {
+        #expect(CommitUndo.restoreMethod(bundleIdentifier: "com.anthropic.claudefordesktop") == .deleteThenMark)
+        #expect(CommitUndo.restoreMethod(bundleIdentifier: "com.google.Chrome.canary") == .deleteThenMark)
+    }
+
+    @Test func otherClientsReplaceRange() {
+        #expect(CommitUndo.restoreMethod(bundleIdentifier: "com.apple.Safari") == .replaceRange)
+        #expect(CommitUndo.restoreMethod(bundleIdentifier: "com.apple.Notes") == .replaceRange)
+        #expect(CommitUndo.restoreMethod(bundleIdentifier: nil) == .replaceRange)
+    }
+
+    @Test func leavesAllButTheLastCharacterForTheClientBackspace() {
+        #expect(CommitUndo.rangeLeftAfterBackspace(NSRange(location: 3, length: 3), text: "東京へ")
+                == NSRange(location: 3, length: 2))
+        #expect(CommitUndo.rangeLeftAfterBackspace(NSRange(location: 0, length: 3), text: "東𠮷")
+                == NSRange(location: 0, length: 1))
+        #expect(CommitUndo.rangeLeftAfterBackspace(NSRange(location: 5, length: 1), text: "へ")
+                == NSRange(location: 5, length: 0))
+    }
 }

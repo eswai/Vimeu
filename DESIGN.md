@@ -507,6 +507,14 @@ Converting に入る。選択位置は確定していた候補で、新しい変
 確定範囲を未確定に戻すのは `setMarkedText(_:selectionRange:replacementRange:)`。
 同じ呼び出しで範囲を戻してから空にする削除方式は、利用者の手元でメモ・Safari では動作し、
 Firefox・Ghostty では動作しなかった（2026-10-24）。再変換方式はこれと同じ呼び出しに依存するが、実機では未検証。
+ただし Chromium 系（Chrome などのブラウザと Claude desktop などの Electron アプリ、バンドル ID の前方一致で判定）は別の手順にする。
+Chromium は IME が処理したキーでも keydown をページへ送り、それは IME が始めた変換より先に届く。
+Web のエディタはまだ変換中でないので自前の Backspace を実行し、置換範囲の変換・同じキー内での空の `insertText` による削除の
+どちらでも、Claude desktop の入力欄で確定文字が残って 2 回表示された（利用者の報告、2026-10-24。ログで両方式とも範囲判定は一致）。
+そこで Backspace はアプリへ通して最後の 1 文字（書記素）をアプリ自身に消させ、20 ms 後に残りの範囲を置換範囲として
+`setMarkedText` で未確定に戻す（キーの外なので Chromium は置換範囲付きの変換をすぐページへ送る）。待つ間に次のキーやクライアント切替があれば取りやめる。
+20 ms 後に残りを空の `insertText(replacementRange:)` で消す方式は、Claude desktop・Chrome で 1 文字だけ消えて残りが残った（利用者の確認、2026-10-24）。
+この手順で Claude desktop の入力欄では正しく再変換できた（利用者の確認、2026-10-24）。他の Chromium 系アプリでは未確認。サンドボックス下では他アプリのバンドルを読めず、Chromium は WebKit と同じ属性一覧を返すため、バンドル ID で判定する。
 判定に使った値と結果は `commitUndo` のログ（subsystem `dev.vimeu.inputmethod`）に出す。
 経緯: 空の `insertText(replacementRange:)` による削除は複数のアプリで 1 文字削除か無動作、
 確定文字数分の Backspace を CGEvent で発行する方式はアクセシビリティ権限が要り、カーソル位置も確認できないため採用しなかった。

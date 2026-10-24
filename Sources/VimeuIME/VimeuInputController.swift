@@ -47,6 +47,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     private var previousRightID: Int?
     /// The commit made by the latest key, for the one-shot Backspace reconversion.
     private var commitUndo = CommitUndo()
+    /// Reconversion waiting for a Chromium client to finish its Backspace.
+    private var pendingReconversion: DispatchWorkItem?
 
     /// Coalesces inline/partial-commit work; results arrive on the main actor.
     private lazy var coordinator: LiveConversionCoordinator = {
@@ -62,6 +64,9 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// be exponential; using the same value here removes the former UI-only
     /// nine-candidate truncation without weakening that guard.
     private static let candidateLimit = NBest.maxExpansions
+    /// Wait before the Chromium reconversion, so it reaches the client after
+    /// the Backspace it passed on (see `CommitUndo.RestoreMethod`).
+    private static let reconversionDelay: TimeInterval = 0.02
 
     /// ASCII punctuation typed directly maps to Japanese punctuation.
     static let punctuation: [Character: String] = [
@@ -99,6 +104,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         MemoryWatchdog.checkAtSessionStart()
         endSession(client: sender, commit: false)
         commitUndo.clear()
+        pendingReconversion?.cancel()
+        pendingReconversion = nil
     }
 
     // The client is going away. Commit what is on screen — silently dropping the
@@ -106,6 +113,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     override func deactivateServer(_ sender: Any!) {
         endSession(client: sender, commit: true)
         commitUndo.clear()
+        pendingReconversion?.cancel()
+        pendingReconversion = nil
         super.deactivateServer(sender)
     }
 
@@ -115,6 +124,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         endSession(client: sender, commit: true)
         // The caret is likely moving elsewhere (a click), so no undo.
         commitUndo.clear()
+        pendingReconversion?.cancel()
+        pendingReconversion = nil
     }
 
     /// Single teardown path shared by all three hooks above.
@@ -188,6 +199,9 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard event.type == .keyDown else { return false }
+        // A key before the pending reconversion ran: the text may have moved.
+        pendingReconversion?.cancel()
+        pendingReconversion = nil
         // Only the key right after a commit may undo it. A key passed through
         // to the client (arrows, Tab, ...) may move the caret, so it forgets
         // even a commit it caused itself.
@@ -702,7 +716,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// committed text is right before the caret.
     ///
     /// `setMarkedText` with a replacement range (the call reconversion uses)
-    /// makes the committed range marked again. Clients that ignore the range
+    /// makes the committed range marked again; Chromium clients go another
+    /// way (`CommitUndo.RestoreMethod.deleteThenMark`). Clients that ignore the range
     /// (Firefox and Ghostty in the user's check, 2026-10-24) cannot be told
     /// apart afterwards, so those already rejected by the check stay normal.
     private func reconvertCommitted(_ entry: CommitUndo.Entry?, client: Any?) -> Bool {
@@ -730,12 +745,6 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             """)
         guard let range else { return false }
 
-        let attrs: [NSAttributedString.Key: Any] = [.underlineStyle: NSUnderlineStyle.single.rawValue]
-        c.setMarkedText(
-            NSAttributedString(string: text, attributes: attrs),
-            selectionRange: NSRange(location: text.utf16.count, length: 0),
-            replacementRange: range
-        )
         let converted = ConversionService.shared
             .convertNow(reading: entry.reading, limit: Self.candidateLimit, previousRightID: entry.previousRightID)
             .map(\.text)
@@ -743,9 +752,39 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             committed: text,
             candidates: Self.conversionCandidates(reading: entry.reading, converted: converted)
         )
-        enterConverting(reading: entry.reading, candidates: restored.candidates, selected: restored.selected,
-                        previousRightID: entry.previousRightID, client: c)
-        return true
+        let method = CommitUndo.restoreMethod(bundleIdentifier: c.bundleIdentifier())
+        logger.info("commitUndo restore=\(String(describing: method), privacy: .public)")
+        switch method {
+        case .replaceRange:
+            let attrs: [NSAttributedString.Key: Any] = [.underlineStyle: NSUnderlineStyle.single.rawValue]
+            c.setMarkedText(
+                NSAttributedString(string: text, attributes: attrs),
+                selectionRange: NSRange(location: text.utf16.count, length: 0),
+                replacementRange: range
+            )
+            enterConverting(reading: entry.reading, candidates: restored.candidates, selected: restored.selected,
+                            previousRightID: entry.previousRightID, client: c)
+            return true
+        case .deleteThenMark:
+            // The client deletes the last character with its own Backspace;
+            // the rest becomes marked once that key is done.
+            let rest = CommitUndo.rangeLeftAfterBackspace(range, text: text)
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.pendingReconversion = nil
+                let attrs: [NSAttributedString.Key: Any] = [.underlineStyle: NSUnderlineStyle.single.rawValue]
+                c.setMarkedText(
+                    NSAttributedString(string: text, attributes: attrs),
+                    selectionRange: NSRange(location: text.utf16.count, length: 0),
+                    replacementRange: rest.length > 0 ? rest : NSRange(location: NSNotFound, length: 0)
+                )
+                self.enterConverting(reading: entry.reading, candidates: restored.candidates,
+                                     selected: restored.selected, previousRightID: entry.previousRightID, client: c)
+            }
+            pendingReconversion = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.reconversionDelay, execute: work)
+            return false
+        }
     }
 
     /// Where the composing text is on screen, or nil if the client won't say.

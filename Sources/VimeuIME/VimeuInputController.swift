@@ -237,7 +237,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     private func handleDirect(event: NSEvent, client: Any?, undoable: CommitUndo.Entry?) -> Bool {
         // Backspace right after a commit brings it back as a conversion.
         // Option+Backspace keeps the client's own word deletion.
-        if Int(event.keyCode) == kVK_Delete, !event.modifierFlags.contains(.option) {
+        if Int(event.keyCode) == kVK_Delete, !event.modifierFlags.contains(.option),
+           ReconversionSettings.backspaceEnabled {
             return reconvertCommitted(undoable, client: client)
         }
         guard let ch = event.characters?.first else { return false }

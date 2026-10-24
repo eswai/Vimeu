@@ -1144,6 +1144,7 @@ private struct InputSettingsView: View {
     @AppStorage(PartialCommitSettings.modeKey) private var partialCommitMode = PartialCommitSettings.defaultMode.rawValue
     @AppStorage(PartialCommitSettings.requiresStableCandidateKey) private var requiresStableCandidate = PartialCommitSettings.defaultRequiresStableCandidate
     @AppStorage(PartialCommitSettings.stableLengthKey) private var stableLength = PartialCommitSettings.defaultStableLength
+    @AppStorage(ReconversionSettings.backspaceKey) private var reconvertOnBackspace = ReconversionSettings.defaultBackspace
     @State private var text = ""
     @State private var invalid = false
     @State private var autoCommitText = ""
@@ -1254,6 +1255,12 @@ private struct InputSettingsView: View {
                         .foregroundStyle(.red)
                 }
                 Text("入力が続くと待ち時間をやり直します。候補の選択中は自動確定しません。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Section("再変換") {
+                Toggle("確定直後の Backspace で再変換する", isOn: $reconvertOnBackspace)
+                Text("確定した文字列を未確定に戻して候補を出します。オフにすると通常どおり 1 文字削除します。カーソル直前の文字列を確認できないアプリ（Firefox、Ghostty など）では、オンでも 1 文字削除になります。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

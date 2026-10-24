@@ -491,6 +491,8 @@ Direct ではアプリへ通し、Command を伴う組み合わせは確定と�
 Ishizuki が Unicode 挿入前に送る Control+M も同じ処理で受け付ける。
 
 確定直後の Backspace は、直前に確定した文字列を未確定に戻す（再変換）。
+調整ウィンドウの入力設定「確定直後の Backspace で再変換する」（`reconvertOnBackspaceAfterCommit`、初期値 ON）で切り替え、
+OFF では確定直後でも通常の 1 文字削除とする。
 確定時に読みと左文脈（`previousRightID`）を記録しておき、戻すときは同じ読みで変換し直して
 Converting に入る。選択位置は確定していた候補で、新しい変換結果に無ければ（Control+J / K のかな表記など）先頭に加える。
 戻した後は Converting の操作どおり、Enter で確定、もう一度 Backspace で読みに戻る。

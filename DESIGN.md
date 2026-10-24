@@ -523,6 +523,7 @@ Firefox は空の確定でカーソルを変換開始位置とみなし、ペー
 経緯: 空の `insertText(replacementRange:)` による削除は複数のアプリで 1 文字削除か無動作、
 確定文字数分の Backspace を CGEvent で発行する方式はアクセシビリティ権限が要り、カーソル位置も確認できないため採用しなかった。
 範囲の判定と候補の並べ方は `CommitUndoTests` / `ReconversionTests` で検証する。
+アプリごとの挙動・原因・調べ方は [docs/client-quirks.md](docs/client-quirks.md) にまとめる。
 
 ライブ変換・部分確定・候補の安定確認は共通の設定で入力停止を待つデバウンス方式とする。未確定ローマ字だけが変わり、読みが
 変わらない打鍵でも待ち時間を再設定する。変換処理は従来どおりバックグラウンドで直列に実行し、
@@ -799,6 +800,7 @@ Mozc の値のまま — `ConnectionTests.testAnEditTouchesExactlyOneCell` が�
 ```
 vimeu/
 ├── DESIGN.md              本書（設計の正本）
+├── docs/                  補足資料（アプリ別の IMK 挙動と対処など）
 ├── Package.swift          依存ゼロ
 ├── Makefile               ビルド・辞書生成・インストール
 ├── Sources/

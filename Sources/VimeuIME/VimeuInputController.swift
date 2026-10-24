@@ -45,6 +45,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// Valid only for the immutable POS table loaded for this process. Kept
     /// within the current composition, never persisted or learned.
     private var previousRightID: Int?
+    /// The commit made by the latest key, for the one-shot Backspace reconversion.
+    private var commitUndo = CommitUndo()
 
     /// Coalesces inline/partial-commit work; results arrive on the main actor.
     private lazy var coordinator: LiveConversionCoordinator = {
@@ -96,12 +98,14 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         super.activateServer(sender)
         MemoryWatchdog.checkAtSessionStart()
         endSession(client: sender, commit: false)
+        commitUndo.clear()
     }
 
     // The client is going away. Commit what is on screen — silently dropping the
     // marked text would lose whatever the user had typed.
     override func deactivateServer(_ sender: Any!) {
         endSession(client: sender, commit: true)
+        commitUndo.clear()
         super.deactivateServer(sender)
     }
 
@@ -109,6 +113,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     // text field). Same contract as deactivation: commit, don't discard.
     override func commitComposition(_ sender: Any!) {
         endSession(client: sender, commit: true)
+        // The caret is likely moving elsewhere (a click), so no undo.
+        commitUndo.clear()
     }
 
     /// Single teardown path shared by all three hooks above.
@@ -182,6 +188,17 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard event.type == .keyDown else { return false }
+        // Only the key right after a commit may undo it. A key passed through
+        // to the client (arrows, Tab, ...) may move the caret, so it forgets
+        // even a commit it caused itself.
+        let undoable = commitUndo.entry
+        commitUndo.clear()
+        let handled = dispatch(event, client: sender, undoable: undoable)
+        if !handled { commitUndo.clear() }
+        return handled
+    }
+
+    private func dispatch(_ event: NSEvent, client sender: Any?, undoable: CommitUndo.Entry?) -> Bool {
 
         // Control+M commits like Return (also sent by Ishizuki before Unicode
         // insertion). With no composition, leave the shortcut to the client.
@@ -212,12 +229,17 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         if !buffer.isEmpty {
             return handleComposing(event: event, client: sender)
         }
-        return handleDirect(event: event, client: sender)
+        return handleDirect(event: event, client: sender, undoable: undoable)
     }
 
     // MARK: - Direct
 
-    private func handleDirect(event: NSEvent, client: Any?) -> Bool {
+    private func handleDirect(event: NSEvent, client: Any?, undoable: CommitUndo.Entry?) -> Bool {
+        // Backspace right after a commit brings it back as a conversion.
+        // Option+Backspace keeps the client's own word deletion.
+        if Int(event.keyCode) == kVK_Delete, !event.modifierFlags.contains(.option) {
+            return reconvertCommitted(undoable, client: client)
+        }
         guard let ch = event.characters?.first else { return false }
         if let punct = Self.punctuation[ch] {
             buffer.acceptKana(punct)
@@ -320,6 +342,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             // then open a new marked range for the suffix, synchronously.
             clearMarkedText(client: client)
             insertText(prefix.text, client: client)
+            // Composition continues after a prefix, so it is never undoable.
+            commitUndo.clear()
             buffer.reading = prefix.remainingReading
             previousRightID = prefix.previousRightID
             // Keep the exact remainder of the displayed best path until its
@@ -377,6 +401,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         // which is exactly what the display string does *not* do (it shows the
         // pending romaji as-is while the user is still typing it).
         let reading = buffer.flushForConversion()
+        let context = previousRightID
         var output = reading
         if Settings.liveConversion,
            let live = liveState, let best = live.candidates.first,
@@ -387,6 +412,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         teardownComposing()
         clearMarkedText(client: client)
         if !output.isEmpty { insertText(output, client: client) }
+        commitUndo.record(text: output, reading: reading, previousRightID: context)
     }
 
     /// Discard the composition entirely (Esc / backspace-to-empty).
@@ -533,6 +559,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         clearMarkedText(client: client)
         panelHide()
         insertText(text, client: client)
+        commitUndo.record(text: text, reading: conv.reading, previousRightID: conv.previousRightID)
     }
 
     private func doCancel(conv: ConvertingState, client: Any?) {
@@ -665,6 +692,58 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             text,
             replacementRange: NSRange(location: NSNotFound, length: 0)
         )
+    }
+
+    /// Turn the text just committed back into a conversion of its reading,
+    /// with the committed candidate selected. Returns false (normal Backspace)
+    /// when there is nothing to undo or the client cannot confirm the
+    /// committed text is right before the caret.
+    ///
+    /// `setMarkedText` with a replacement range (the call reconversion uses)
+    /// makes the committed range marked again. Clients that ignore the range
+    /// (Firefox and Ghostty in the user's check, 2026-10-24) cannot be told
+    /// apart afterwards, so those already rejected by the check stay normal.
+    private func reconvertCommitted(_ entry: CommitUndo.Entry?, client: Any?) -> Bool {
+        guard let entry, let c = client as? IMKTextInput else { return false }
+        let text = entry.text
+        let app = c.bundleIdentifier() ?? "?"
+        let selected = c.selectedRange()
+        var source = "none"
+        let range = CommitUndo.range(for: text, selectedRange: selected) { r in
+            if let s = c.attributedSubstring(from: r)?.string {
+                source = "attributedSubstring(len=\(s.utf16.count))"
+                if s == text { return s }
+            }
+            var actual = NSRange(location: NSNotFound, length: 0)
+            if let s = c.string(from: r, actualRange: &actual) {
+                source += " string(len=\(s.utf16.count) actual=\(NSStringFromRange(actual)))"
+                return s
+            }
+            return nil
+        }
+        logger.info("""
+            commitUndo app=\(app, privacy: .public) selected=\(NSStringFromRange(selected), privacy: .public) \
+            committedLen=\(text.utf16.count, privacy: .public) read=\(source, privacy: .public) \
+            match=\(range != nil, privacy: .public)
+            """)
+        guard let range else { return false }
+
+        let attrs: [NSAttributedString.Key: Any] = [.underlineStyle: NSUnderlineStyle.single.rawValue]
+        c.setMarkedText(
+            NSAttributedString(string: text, attributes: attrs),
+            selectionRange: NSRange(location: text.utf16.count, length: 0),
+            replacementRange: range
+        )
+        let converted = ConversionService.shared
+            .convertNow(reading: entry.reading, limit: Self.candidateLimit, previousRightID: entry.previousRightID)
+            .map(\.text)
+        let restored = CommitUndo.reconversionCandidates(
+            committed: text,
+            candidates: Self.conversionCandidates(reading: entry.reading, converted: converted)
+        )
+        enterConverting(reading: entry.reading, candidates: restored.candidates, selected: restored.selected,
+                        previousRightID: entry.previousRightID, client: c)
+        return true
     }
 
     /// Where the composing text is on screen, or nil if the client won't say.

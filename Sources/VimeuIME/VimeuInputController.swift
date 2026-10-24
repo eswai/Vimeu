@@ -546,8 +546,9 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     private func updateConvertingSelection(_ conv: ConvertingState, client: Any?) {
         converting = conv
         updateMarkedText(with: conv.candidates[conv.selected], client: client)
-        // Re-anchor on every selection change: candidates differ in length, so
-        // the composing text — and with it the caret — moves as the user cycles.
+        // Re-anchor on every selection change. The anchor is the start of the
+        // composing text, so it stays put while cycling; re-reading it only
+        // follows the client if it scrolled or reflowed.
         panelUpdate(conv.candidates, selected: conv.selected, anchor: caretRect(client: client))
     }
 
@@ -749,21 +750,21 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
     /// Where the composing text is on screen, or nil if the client won't say.
     private func caretRect(client: Any?) -> NSRect? {
         guard let c = client as? IMKTextInput else { return nil }
-        // Prefer the marked (composing) range: that's where the user is looking.
-        var range = c.markedRange()
-        if range.location == NSNotFound { range = c.selectedRange() }
-        if range.location == NSNotFound { range = NSRange(location: 0, length: 0) }
-
         // `firstRect(forCharacterRange:actualRange:)` is unreliable through the
         // IMK client proxy from Swift (it hands back uninitialized memory), so
         // ask for the line-height rectangle instead — the documented way to
         // locate the caret, and it fills the rect via an out-parameter.
+        //
+        // The index is relative to the marked text, not the document: 0 is
+        // the start of the composing text (macSKK, Squirrel and azooKey all
+        // pass 0). Passing `markedRange().location` — a document offset —
+        // pointed past the marked text, and clients answered that differently
+        // (clamped to its end, the line start, or garbage), so the panel moved
+        // around depending on the app and on how far into the document the
+        // caret was. Anchoring to the start also keeps the panel still while
+        // cycling candidates of different lengths.
         var rect = NSRect.zero
-        _ = c.attributes(forCharacterIndex: range.location, lineHeightRectangle: &rect)
-        if !isUsable(rect) {
-            rect = .zero
-            _ = c.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
-        }
+        _ = c.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
         guard isUsable(rect), rect.origin != .zero else { return nil }
         return rect
     }

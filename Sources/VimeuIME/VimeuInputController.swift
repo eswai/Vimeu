@@ -355,8 +355,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             partialCommitStability.reset()
             // Replace the old marked range with just the committed prefix,
             // then open a new marked range for the suffix, synchronously.
-            clearMarkedText(client: client)
-            insertText(prefix.text, client: client)
+            commitText(prefix.text, client: client)
             // Composition continues after a prefix, so it is never undoable.
             commitUndo.clear()
             buffer.reading = prefix.remainingReading
@@ -425,8 +424,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             output = best + reading.dropFirst(live.reading.count)
         }
         teardownComposing()
-        clearMarkedText(client: client)
-        if !output.isEmpty { insertText(output, client: client) }
+        commitText(output, client: client)
         commitUndo.record(text: output, reading: reading, previousRightID: context)
     }
 
@@ -572,9 +570,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         recordLastConversionReading(conv.reading)
         converting = nil
         teardownComposing()
-        clearMarkedText(client: client)
         panelHide()
-        insertText(text, client: client)
+        commitText(text, client: client)
         commitUndo.record(text: text, reading: conv.reading, previousRightID: conv.previousRightID)
     }
 
@@ -701,6 +698,20 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             selectionRange: NSRange(location: 0, length: 0),
             replacementRange: NSRange(location: NSNotFound, length: 0)
         )
+    }
+
+    /// Commit by inserting over the marked text, without clearing it first.
+    /// Clearing first commits an empty composition: Firefox then takes the
+    /// caret to be the composition start and keeps that until the page
+    /// reports the selection, which came only after the next key
+    /// (`about:logging` IMEHandler, 2026-10-24), so the Backspace
+    /// reconversion saw `selectedRange` {0, 0} and fell back to a delete.
+    private func commitText(_ text: String, client: Any?) {
+        if text.isEmpty {
+            clearMarkedText(client: client)
+        } else {
+            insertText(text, client: client)
+        }
     }
 
     private func insertText(_ text: String, client: Any?) {

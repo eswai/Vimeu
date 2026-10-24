@@ -515,6 +515,10 @@ Web のエディタはまだ変換中でないので自前の Backspace を実�
 `setMarkedText` で未確定に戻す（キーの外なので Chromium は置換範囲付きの変換をすぐページへ送る）。待つ間に次のキーやクライアント切替があれば取りやめる。
 20 ms 後に残りを空の `insertText(replacementRange:)` で消す方式は、Claude desktop・Chrome で 1 文字だけ消えて残りが残った（利用者の確認、2026-10-24）。
 この手順で Claude desktop の入力欄では正しく再変換できた（利用者の確認、2026-10-24）。他の Chromium 系アプリでは未確認。サンドボックス下では他アプリのバンドルを読めず、Chromium は WebKit と同じ属性一覧を返すため、バンドル ID で判定する。
+確定は未確定文字列を残したまま `insertText` で置き換える（部分確定も同じ）。先に `setMarkedText("")` で空にしてから `insertText` すると、
+Firefox は空の確定でカーソルを変換開始位置とみなし、ページから選択位置の通知が来る次のキーまでその値を返す。
+そのため Firefox では確定直後の `selectedRange` が {0, 0} になり、再変換せず通常の Backspace になっていた
+（Firefox の `about:logging` の IMEHandler ログと `TextInputHandler.mm` で確認、2026-10-24）。置き換える確定に変えて、Firefox でも再変換できた（利用者の確認、2026-10-24）。
 判定に使った値と結果は `commitUndo` のログ（subsystem `dev.vimeu.inputmethod`）に出す。
 経緯: 空の `insertText(replacementRange:)` による削除は複数のアプリで 1 文字削除か無動作、
 確定文字数分の Backspace を CGEvent で発行する方式はアクセシビリティ権限が要り、カーソル位置も確認できないため採用しなかった。

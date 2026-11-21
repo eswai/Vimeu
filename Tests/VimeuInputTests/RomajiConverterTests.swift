@@ -152,4 +152,14 @@ final class InputBufferTests: XCTestCase {
         XCTAssertEqual(buffer.flushForConversion(), "きょう")
         XCTAssertEqual(buffer.flushForConversion(), "きょう", "flushing twice must not duplicate")
     }
+
+    /// Option+Space while composing: a pending syllable is flushed first,
+    /// like punctuation, and the space stays in the reading.
+    func testFullWidthSpaceFlushesPendingRomaji() {
+        var buffer = InputBuffer()
+        for ch in "kyoun" { buffer.accept(ch) }
+        buffer.acceptKana(InputBuffer.fullWidthSpace)
+        for ch in "ha" { buffer.accept(ch) }
+        XCTAssertEqual(buffer.flushForConversion(), "きょうん\u{3000}は")
+    }
 }

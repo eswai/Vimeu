@@ -507,6 +507,14 @@ Converting では選択中の候補を確定する。確定キー自体は消費
 Direct ではアプリへ通し、Command を伴う組み合わせは確定として扱わない。
 Ishizuki が Unicode 挿入前に送る Control+M も同じ処理で受け付ける。
 
+Option+Space は状態にかかわらず全角スペース（U+3000）を入力する。Mozc の `InsertFullSpace`
+と同じ動作だが、Mozc のことえり風キーマップ（`src/data/keymap/kotoeri.tsv`）が割り当てているのは
+Composition だけである。vimeu では Direct・Converting でも全角スペースにする。
+- Direct: そのままアプリへ確定する。変換ではないので、直後の Backspace による再変換の対象にはしない
+- Composing: 読みに加える。未完成のローマ字は句読点と同じくフラッシュしてから加える。
+  辞書の読みに無い文字なので素通しノードとして変換され、候補にもそのまま残る
+- Converting: 選択中の候補を確定し、全角スペースから新しい読みを始める（句読点と同じ）
+
 確定直後の Backspace は、直前に確定した文字列を未確定に戻す（再変換）。
 調整ウィンドウの入力設定「確定直後の Backspace で再変換する」（`reconvertOnBackspaceAfterCommit`、初期値 ON）で切り替え、
 OFF では確定直後でも通常の 1 文字削除とする。
@@ -519,6 +527,13 @@ Converting に入る。選択位置は確定していた候補で、新しい変
 カーソル直前の文字列が確定した文字列と一致しない（`selectedRange` で位置を得て、
 `attributedSubstring(from:)`、返らなければ `string(from:actualRange:)` で確認）、
 範囲選択がある、アプリがカーソル位置や文字列を返さない、Option+Backspace。
+
+Control+Backspace は同じ再変換を、上の設定にかかわらず行う（Mozc のキーマップの
+`Precomposition Ctrl Backspace → Undo` に合わせた）。Backspace の再変換を OFF にしても
+確定の取り消しは使える。Direct でだけ扱い、取り消せる確定が無い・上の条件に当たる場合はアプリへ通す。
+Chromium 系（後述）では扱わずアプリへ通す。Chromium 系の手順はアプリ自身にちょうど 1 文字消させる前提だが、
+Cocoa の標準キーバインドでは Control+Delete が `deleteBackwardByDecomposingPreviousCharacter:` であり、
+`が` を消すと `か` が残りうるためである（実機では未検証）。
 アプリへ通したキー（矢印・Tab など）はカーソルを動かしうるので、確定を伴っていても記憶を消す。
 クライアント切替と IMK の `commitComposition`（クリックによる確定）でも記憶を消す。
 確定範囲を未確定に戻すのは `setMarkedText(_:selectionRange:replacementRange:)`。

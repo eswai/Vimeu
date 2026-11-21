@@ -217,6 +217,11 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         // Control+M commits like Return (also sent by Ishizuki before Unicode
         // insertion). With no composition, leave the shortcut to the client.
         // Control+J / Control+K force the reading to hiragana / katakana.
+        // Control+Backspace undoes the last commit (Mozc's `Undo`) whether or
+        // not plain Backspace is set to; with nothing to undo it goes to the
+        // client. Not in Chromium clients: there the client's own Backspace
+        // must delete exactly one character, and Cocoa's Control+Delete
+        // (`deleteBackwardByDecomposingPreviousCharacter:`) would leave か of が.
         let mods = event.modifierFlags
         if mods.contains(.control), !mods.contains(.command) {
             switch Int(event.keyCode) {
@@ -226,12 +231,23 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
                 return true
             case kVK_ANSI_J: return handleKanaConversion(kind: .hiragana, client: sender)
             case kVK_ANSI_K: return handleKanaConversion(kind: .katakana, client: sender)
+            case kVK_Delete where !mods.contains(.option) && converting == nil && buffer.isEmpty:
+                let app = (sender as? IMKTextInput)?.bundleIdentifier()
+                guard CommitUndo.restoreMethod(bundleIdentifier: app) == .replaceRange else { return false }
+                return reconvertCommitted(undoable, client: sender)
             default: break
             }
         }
 
         // Command / Control combos always pass through.
         if mods.contains(.command) || mods.contains(.control) { return false }
+
+        // Option+Space always types a full-width space (Mozc's
+        // `InsertFullSpace`). With no composition it goes straight to the
+        // client; otherwise it joins the reading, as punctuation does.
+        if Int(event.keyCode) == kVK_Space, mods.contains(.option) {
+            return insertFullWidthSpace(client: sender)
+        }
 
         // Swallow non-space keys that produce a space character
         // (the international / eisu / kana keys do).
@@ -244,6 +260,24 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             return handleComposing(event: event, client: sender)
         }
         return handleDirect(event: event, client: sender, undoable: undoable)
+    }
+
+    // MARK: - Full-width space
+
+    /// Direct: insert U+3000. Composing: add it to the reading, where it
+    /// converts as a passthrough node. Converting: commit the selected
+    /// candidate and start a new composition with it, like punctuation.
+    private func insertFullWidthSpace(client: Any?) -> Bool {
+        if let conv = converting {
+            doCommit(conv: conv, client: client)
+        } else if buffer.isEmpty {
+            insertText(InputBuffer.fullWidthSpace, client: client)
+            return true
+        }
+        buffer.acceptKana(InputBuffer.fullWidthSpace)
+        submitConversion()
+        updateMarkedText(client: client)
+        return true
     }
 
     // MARK: - Direct

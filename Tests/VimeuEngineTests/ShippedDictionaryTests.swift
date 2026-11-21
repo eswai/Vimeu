@@ -148,4 +148,14 @@ final class ShippedDictionaryTests: XCTestCase {
         editor.setWordCost(reading: reading, surface: surface, cost: 0)
         XCTAssertEqual(best(reading), surface)
     }
+
+    /// A full-width space typed with Option+Space is not in any reading; it
+    /// converts as a passthrough node and survives in every candidate.
+    func testFullWidthSpaceSurvivesConversion() {
+        let candidates = convert("きょう\u{3000}あした")
+        XCTAssertFalse(candidates.isEmpty)
+        for candidate in candidates {
+            XCTAssertTrue(candidate.text.contains("\u{3000}"), candidate.text)
+        }
+    }
 }

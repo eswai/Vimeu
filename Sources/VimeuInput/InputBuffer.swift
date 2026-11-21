@@ -30,6 +30,9 @@ public struct InputBuffer {
         ch.isLetter || isASCIIDigit(ch)
     }
 
+    /// U+3000, inserted by Option+Space while composing.
+    public static let fullWidthSpace = "\u{3000}"
+
     // Directly append a kana character (e.g. ー from the minus key).
     public mutating func acceptKana(_ kana: String) {
         reading += converter.drain()

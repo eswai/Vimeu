@@ -68,7 +68,8 @@ vimeu が代わりに持っているのは次の 2 つだけで、どちらも�
 | ライブ変換 | ✗（予測の realtime conversion とは別物） | ○ |
 | 自動変換 | △（句読点のキーで変換する `use_auto_conversion`） | ○（入力が止まってから時間で確定） |
 | 長い入力の部分確定 | △（先頭の文節だけ確定する `CommitOnlyFirstSegment`） | ○（文字数・候補の安定・品詞で境界を選ぶ） |
-| 確定の取り消し | ○（`Undo`、Ctrl+Backspace） | ○（確定直後の Backspace で再変換） |
+| 確定の取り消し | ○（`Undo`、Ctrl+Backspace） | ○（確定直後の Backspace / Ctrl+Backspace で再変換。Chromium 系では Ctrl+Backspace は対象外） |
+| 全角スペース（Option+Space） | ○（`InsertFullSpace`。ことえり風キーマップでは入力中のみ） | ○（状態にかかわらず） |
 | 選択した文字列の再変換 | ○（`Reconvert`、`selectedRange` を使う） | ✗ |
 | シークレットモード | ○（`incognito_mode`） | 不要（学習しないため） |
 | プロセス構成 | Converter・Renderer・Qt の GUI に分かれている | Swift の単一プロセス、mmap 辞書 |

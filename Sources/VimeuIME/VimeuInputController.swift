@@ -222,9 +222,14 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         // client. Not in Chromium clients: there the client's own Backspace
         // must delete exactly one character, and Cocoa's Control+Delete
         // (`deleteBackwardByDecomposingPreviousCharacter:`) would leave か of が.
+        // Control+; opens the adjustment window in any state, like the menu
+        // item; it has no Cocoa key binding to take away from the client.
         let mods = event.modifierFlags
         if mods.contains(.control), !mods.contains(.command) {
             switch Int(event.keyCode) {
+            case kVK_ANSI_Semicolon where !mods.contains(.option) && !mods.contains(.shift):
+                openAdjustmentWindow(nil)
+                return true
             case kVK_ANSI_M:
                 guard converting != nil || !buffer.isEmpty else { return false }
                 endSession(client: sender, commit: true)

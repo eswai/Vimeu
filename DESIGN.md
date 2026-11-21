@@ -507,6 +507,8 @@ Converting では選択中の候補を確定する。確定キー自体は消費
 Direct ではアプリへ通し、Command を伴う組み合わせは確定として扱わない。
 Ishizuki が Unicode 挿入前に送る Control+M も同じ処理で受け付ける。
 
+Control+; は状態にかかわらず調整ウィンドウを開く。入力メニューの「調整...」と同じ処理で、Composing・Converting の読みがあればそれを入れて開く。キー自体は消費する。Cocoa の標準キーバインド（Emacs 風の Control+文字）に割り当てが無いキーとして選んだ（アプリごとの衝突は未検証）。Option・Shift を伴う場合は扱わない。Ghostty は IME が消費したキーも、marked text が無ければ端末へ送るので、未入力時は `9;5u` が入る。IME 側では止められず、Ghostty の設定 `ctrl+semicolon=ignore` でも止まらなかった（2026-11-21）。制約として扱う（docs/client-quirks.md）。
+
 Option+Space は状態にかかわらず全角スペース（U+3000）を入力する。Mozc の `InsertFullSpace`
 と同じ動作だが、Mozc のことえり風キーマップ（`src/data/keymap/kotoeri.tsv`）が割り当てているのは
 Composition だけである。vimeu では Direct・Converting でも全角スペースにする。

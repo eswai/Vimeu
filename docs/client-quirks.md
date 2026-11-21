@@ -13,7 +13,7 @@ macOS の IME は、アプリ（IMK クライアント）ごとに `setMarkedTex
 | ネイティブ（メモ、Safari など AppKit / WebKit） | 下記以外すべて | 確定範囲を置換範囲にして `setMarkedText` | marked text の上に `insertText` | 削除方式はメモ・Safari で動作（2026-10-24）。この方式での再変換は未確認 |
 | Chromium 系（Chrome などのブラウザ、Claude desktop などの Electron アプリ） | バンドル ID の前方一致（`CommitUndo.chromiumBundlePrefixes`） | Backspace はアプリへ通し、20 ms 後に残りを置換範囲にして `setMarkedText` | 同上 | Claude desktop の入力欄で動作（2026-10-24）。Chrome などほかのアプリは未確認 |
 | Firefox | ネイティブと同じ | ネイティブと同じ | 同上（この方式に変えたのは Firefox が理由） | Web ページの入力欄で動作（2026-10-24） |
-| Ghostty | ネイティブと同じ | ネイティブと同じ | 同上 | 削除方式は動作しなかった（2026-10-24）。原因は未調査 |
+| Ghostty | ネイティブと同じ | ネイティブと同じ | 同上 | 削除方式は動作しなかった（2026-10-24）。原因は未調査。未入力時の Control+; は端末にも `9;5u` として送られる（2026-11-21、未対処） |
 | Google Docs（Safari） | ネイティブと同じ（ページは見分けない） | 再変換できない。通常の Backspace になる | 同上 | 制約として扱う（2026-11-21）。Chrome では未確認 |
 
 「削除方式」は再変換を作る前に試したもので、同じ `setMarkedText(replacementRange:)` で範囲を戻してから空にする。
@@ -94,6 +94,23 @@ Firefox はこれを確定文字列での確定として扱い、カーソル位
 
 削除方式は動作しなかった（2026-10-24）。再変換は未確認で、原因も調べていない。調べるときは下の手順で `commitUndo` のログを取る。
 
+### Control+; が `9;5u` として入力される
+
+未入力の状態で Control+; を押すと、調整ウィンドウは開くが、シェルに `9;5u` が入る（利用者の報告、2026-11-21）。
+
+原因（Ghostty のソース `macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift` の `keyDown(with:)` を読んだ、2026-11-21 の main）:
+Ghostty は `interpretKeyEvents` で IME にキーを渡した後、IME が処理したかを `handle` の戻り値では判定しない。
+見るのは、処理の前後に marked text があったかと、`insertText` で文字が届いたかだけである。
+どちらも無ければ通常のキーとして端末へエンコードする。Control+; は対応する制御文字が無いので
+CSI u 形式の `ESC [ 59 ; 5 u` になり、シェルが `ESC [ 5` までを読んで残りの `9;5u` が入力される。
+入力中・候補選択中は marked text があるので、Ghostty はキーを送らない。
+
+扱い: 制約として扱い、対処しない（2026-11-21）。キーを消費しても Ghostty には伝わらないため、IME からは止められない。
+marked text を一時的に置いて Ghostty に入力中と思わせる方法は、表示が乱れるうえ、ほかのアプリへ影響しうるので採らない。
+
+Ghostty の設定 `keybind = ctrl+semicolon=ignore` も試したが、`9;5u` は入力されたままだった（利用者の手元、2026-11-21）。
+`ignore` は Ghostty 自身の処理と端末への送信を止める（`src/input/Binding.zig` の `Action.ignore`）はずだが、効かなかった理由は調べていない。
+
 ## Google Docs（Safari）
 
 ### 症状
@@ -157,6 +174,7 @@ IME の呼び出しと Firefox が覚えている選択位置の移り変わり�
 |---|---|---|
 | Chromium（Cocoa 側） | `content/app_shim_remote_cocoa/render_widget_host_view_cocoa.mm` | `setMarkedText:selectedRange:replacementRange:`、`insertText:replacementRange:`、`keyEvent:` |
 | Chromium（Blink 側） | `third_party/blink/renderer/core/exported/web_input_method_controller_impl.cc`、`core/editing/ime/input_method_controller.cc` | `SetComposition`、`CommitText`、`ReplaceTextAndKeepSelection` |
+| Ghostty | `macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift`、`src/input/Binding.zig` | `keyDown(with:)`、`performKeyEquivalent(with:)`、`Action.ignore` |
 | Firefox | `widget/cocoa/TextInputHandler.mm` | `IMEInputHandler::SelectedRange`、`DispatchCompositionCommitEvent`、`InsertTextAsCommittingComposition`、`TextInputHandler::InsertText` |
 
 Chromium は `https://chromium.googlesource.com/chromium/src/+/refs/heads/main/<path>?format=TEXT`（base64）、

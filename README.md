@@ -96,13 +96,16 @@ make install
 | 候補選択中 | `1`〜`9` | 番号で直接選んで確定 |
 | 候補選択中 | `Enter` | 選択中の候補を確定 |
 | 候補選択中 | `Esc` / `Delete` | 変換を取り消して入力中へ戻る |
+| いつでも | `Control+;` | 調整ウィンドウを開く（メニューの「調整...」と同じ） |
+
+Ghostty では、未入力の状態で `Control+;` を押すと端末に `9;5u` も入力される（[docs/client-quirks.md](docs/client-quirks.md#ghostty)）。
 
 ## 変換の調整
 
 メニューバーの入力メニュー（入力ソースのアイコン）から操作する。
 
 - **ライブ変換** — 入力しながらの変換表示をオン/オフ。
-- **調整...** — 調整ウィンドウを開く。開いた時点で編集中の読みが入っているので、
+- **調整...** — 調整ウィンドウを開く（`Control+;` でも開ける）。開いた時点で編集中の読みが入っているので、
   おかしな変換に出会ったその文脈のまま調整に入れる。
   「設定」では部分確定を始める読みの文字数と、ライブ変換オフ時に漢字変換して確定するか、
   ひらがなのまま確定するかを変更できる。部分確定自体のオン・オフも切り替えられる。
@@ -204,7 +207,7 @@ swift run -c release vimeu-dictbuild inspect dict/vimeu.dic --sample 10
 # 1 つの読みを変換して、分割・品詞・コスト内訳を見る
 swift run -c release vimeu-eval --dic dict/vimeu.dic --convert きょうはいいてんきですね
 
-# 調整ウィンドウを IME の外で開く（IME 内からはメニュー経由でしか開けないため）
+# 調整ウィンドウを IME の外で開く（IME を入力ソースに登録せずに確かめるため）
 swift run vimeu-preview --reading きょうはいいてんきですね
 swift run vimeu-preview --tab connections --dark 1 --snapshot /tmp/tune.png
 

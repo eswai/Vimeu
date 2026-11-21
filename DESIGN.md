@@ -551,6 +551,9 @@ Web のエディタはまだ変換中でないので自前の Backspace を実�
 Firefox は空の確定でカーソルを変換開始位置とみなし、ページから選択位置の通知が来る次のキーまでその値を返す。
 そのため Firefox では確定直後の `selectedRange` が {0, 0} になり、再変換せず通常の Backspace になっていた
 （Firefox の `about:logging` の IMEHandler ログと `TextInputHandler.mm` で確認、2026-10-24）。置き換える確定に変えて、Firefox でも再変換できた（利用者の確認、2026-10-24）。
+Google Docs（Safari）では再変換できず、通常の Backspace になる（制約として扱う）。Docs は IME に本文を見せず、
+8 文字を確定した直後でも `selectedRange` が {1, 0} を返したため、確定範囲を指せない（`commitUndo` のログ、利用者の手元で確認、2026-11-21）。
+Chrome の Docs は未確認。
 判定に使った値と結果は `commitUndo` のログ（subsystem `dev.vimeu.inputmethod`）に出す。
 経緯: 空の `insertText(replacementRange:)` による削除は複数のアプリで 1 文字削除か無動作、
 確定文字数分の Backspace を CGEvent で発行する方式はアクセシビリティ権限が要り、カーソル位置も確認できないため採用しなかった。

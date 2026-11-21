@@ -14,6 +14,7 @@ macOS の IME は、アプリ（IMK クライアント）ごとに `setMarkedTex
 | Chromium 系（Chrome などのブラウザ、Claude desktop などの Electron アプリ） | バンドル ID の前方一致（`CommitUndo.chromiumBundlePrefixes`） | Backspace はアプリへ通し、20 ms 後に残りを置換範囲にして `setMarkedText` | 同上 | Claude desktop の入力欄で動作（2026-10-24）。Chrome などほかのアプリは未確認 |
 | Firefox | ネイティブと同じ | ネイティブと同じ | 同上（この方式に変えたのは Firefox が理由） | Web ページの入力欄で動作（2026-10-24） |
 | Ghostty | ネイティブと同じ | ネイティブと同じ | 同上 | 削除方式は動作しなかった（2026-10-24）。原因は未調査 |
+| Google Docs（Safari） | ネイティブと同じ（ページは見分けない） | 再変換できない。通常の Backspace になる | 同上 | 制約として扱う（2026-11-21）。Chrome では未確認 |
 
 「削除方式」は再変換を作る前に試したもので、同じ `setMarkedText(replacementRange:)` で範囲を戻してから空にする。
 
@@ -92,6 +93,35 @@ Firefox はこれを確定文字列での確定として扱い、カーソル位
 ## Ghostty
 
 削除方式は動作しなかった（2026-10-24）。再変換は未確認で、原因も調べていない。調べるときは下の手順で `commitUndo` のログを取る。
+
+## Google Docs（Safari）
+
+### 症状
+
+確定直後の Backspace で再変換にならず、通常の Backspace として 1 文字消える（利用者の報告、2026-11-21）。
+同日の Safari での `commitUndo` のログは次の 2 件で、どちらも照合まで進んでいない。
+
+```
+commitUndo app=com.apple.Safari selected={1, 0} committedLen=3 read=none match=false
+commitUndo app=com.apple.Safari selected={1, 0} committedLen=8 read=none match=false
+```
+
+2 件目は、利用者が Safari の Google Docs で確定してすぐ Backspace を押したときに取った。1 件目は同じ時間帯の Safari のもので、Docs で取ったかは記録していない。
+
+### 原因
+
+カーソル位置が 1 で、確定文字数（8）より手前にある。そのため `CommitUndo.range` は範囲を作れない（`selectedRange.location >= length` を満たさない）。
+
+推測（Docs のソースは読んでいない）: Google Docs は本文を canvas に描き、キー入力をページ内の見えない入力用要素で受ける。
+IME から見えるテキストはその要素の中身（1 文字ほど）だけで、確定した文字は Docs がすぐ本文へ移す。
+そのため、IME から本文中の確定範囲を指すことができない。
+
+### 扱い
+
+制約として扱い、対処しない（2026-11-21）。照合できないときは通常の Backspace にするという共通の流れどおりに動く。
+置換範囲で戻す方式は、ネイティブ用も Chromium 用も本文の範囲を指す必要があるので使えない。
+確定文字数分の Backspace を CGEvent で送る方式は、DESIGN.md §4.1 の経緯にあるとおり採用しない。
+Control+Backspace も同じ判定を使うので、Docs では通常の削除になる。
 
 ## 調べ方
 

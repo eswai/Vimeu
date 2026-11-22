@@ -1,0 +1,7 @@
+/* Export only the C API of Sources/CVimeu/include/vimeu.h. The statically
+ * linked Swift runtime stays private, so it cannot clash with another copy
+ * loaded into the same fcitx5 process. */
+{
+  global: vimeu_*;
+  local: *;
+};

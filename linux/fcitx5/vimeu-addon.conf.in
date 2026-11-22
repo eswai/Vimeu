@@ -1,0 +1,8 @@
+[Addon]
+Name=vimeu
+Category=InputMethod
+Version=@PROJECT_VERSION@
+Library=fcitx5-vimeu
+Type=SharedLibrary
+OnDemand=True
+Configurable=True

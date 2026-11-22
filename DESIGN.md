@@ -845,6 +845,9 @@ vimeu/
 │   ├── VimeuUserDict/     ユーザー編集の値型と TSV ストア
 │   ├── VimeuEngine/       ラティス + Viterbi + A* n-best + オーバレイ + 共起 + 編集 API
 │   ├── VimeuInput/        ローマ字オートマトン
+│   ├── VimeuSession/      OS 非依存の入力セッション（§8。Linux 版が使う）
+│   ├── CVimeu/            C API のヘッダ（include/vimeu.h）
+│   ├── VimeuCAPI/         C API の Swift 実装 → libvimeu.so（Linux）
 │   ├── VimeuUI/           候補パネル・調整ウィンドウ
 │   ├── VimeuIME/          IMKInputController・エントリポイント
 │   ├── vimeu-dictbuild/   辞書ビルド CLI
@@ -852,6 +855,7 @@ vimeu/
 │   └── vimeu-preview/     調整ウィンドウを IME の外で開く開発用ハーネス
 ├── Tests/
 ├── Resources/             Info.plist / entitlements / アイコン
+├── linux/                 fcitx5 アドオン・libvimeu.map・Arch の PKGBUILD（§8）
 ├── dict/                  辞書データ（生成物は gitignore）
 └── corpus/                精度回帰用テストセット
 ```
@@ -865,3 +869,104 @@ vimeu の独自コードは BSD 3-Clause License とする。Mozc の Google 製
 ソース配布には `LICENSE` と `THIRD_PARTY_NOTICES.md` を含める。生成済み `vimeu.dic` を含む
 アプリをバイナリ配布するときも、両ファイルをアプリの配布物または付属文書に含める。
 vimeu は Google 日本語入力または Mozc の公式配布物を名乗らない。
+
+---
+
+## 8. Linux（fcitx5）
+
+macOS 版と同じ変換コアを Linux の fcitx5 で動かす。§1.3 の可搬な 4 モジュール
+（`VimeuDict` / `VimeuEngine` / `VimeuUserDict` / `VimeuInput`）は**ソースを変えずに**使う。
+Linux のために変えた箇所は、ユーザー辞書の既定ディレクトリ（XDG）と、
+`vimeu-dictbuild` の `glob` の件数フィールド（glibc は `gl_pathc`）の 2 つだけである。
+
+### 8.1 構成
+
+```
+fcitx5 プロセス（IME 本体はこの中だけで動く。デーモンも D-Bus も無い）
+ ├─ fcitx5-vimeu.so   C++ の fcitx5 アドオン（linux/fcitx5）。キー変換・preedit・候補・タイマー・設定
+ │     │  C ABI（Sources/CVimeu/include/vimeu.h）
+ │     ▼
+ └─ libvimeu.so       Swift（VimeuCAPI → VimeuSession → 可搬コア）。Swift ランタイムと Foundation を静的に含む
+```
+
+- **VimeuSession** は `VimeuInputController` の状態遷移（§4.1）を OS 非依存にしたもの。
+  入力は論理キー（`SessionKey` + 修飾）、出力は `SessionClient` プロトコル
+  （preedit・確定・候補・周辺テキスト・タイマー・調整ウィンドウ）。macOS 版との違いは次の 3 点で、
+  挙動は同じにしてある。
+  - 変換は**呼び出し元のスレッドで同期的に**行う。fcitx5 はイベントループが 1 本で、
+    1 文の変換はミリ秒を大きく下回るためである（下の実測値）。待ち時間（ライブ変換の遅延・自動確定）は
+    ホストのタイマー（`EventLoop::addTimeEvent`）で実現する
+  - 再変換（確定直後の Backspace）は、IMK の範囲指定の代わりに fcitx5 の **surrounding text**
+    （Unicode スカラ単位）で照合し、`deleteSurroundingText` で消してから Converting に戻す。
+    クライアントが surrounding text を出さない場合や、照合が合わない場合は、アプリの Backspace に任せる
+  - 候補は 10 件ずつのページで表示し、数字キー 1〜9 は**表示中のページ内**の番号として扱う
+    （fcitx5 の候補ウィンドウがページごとに番号を振るため）
+- macOS の `PartialCommit` / `PartialCommitStability` / `CommitUndo` は、VimeuSession に
+  **写して**使っている。macOS 側のソースは Linux では検証できないので変えていない。
+  `VimeuInputController` を VimeuSession の上に載せ替えて重複をなくす作業は、上流への別の変更として行う
+- 設定は fcitx5 の設定ファイル（`~/.config/fcitx5/conf/vimeu.conf`、`fcitx5-configtool` で編集）が持ち、
+  `vimeu_session_set_settings` でスナップショットとして渡す。項目は README「変換の調整」と同じ
+- 状態表示メニューは「ライブ変換」の切り替えと「調整...」。調整ウィンドウ（`vimeu-tune`）はまだ無い（§8.4）
+
+### 8.2 パス
+
+| 用途 | 場所 |
+|---|---|
+| 辞書 | `$VIMEU_DIC` → `$XDG_DATA_HOME/vimeu/vimeu.dic` → `/usr/share/vimeu/vimeu.dic` の順に探す |
+| ユーザー辞書 | `$XDG_DATA_HOME/vimeu/`（既定は `~/.local/share/vimeu/`）。TSV 3 種は macOS と同じ形式 |
+| 設定 | `~/.config/fcitx5/conf/vimeu.conf` |
+
+ユーザー辞書のディレクトリは inotify で見張り、変更があれば 200 ms 待ってまとめてから
+`DictionaryEditor` を作り直して差し替える（§2.3 の「丸ごと差し替え」と同じ）。
+手で編集したり、ほかの端末からコピーしたりしても、fcitx5 を再起動せずに反映される。
+
+### 8.3 ビルドと共有ライブラリ
+
+`libvimeu.so` は `-static-stdlib` でリンクし、依存するのは glibc・libstdc++・libm・libgcc_s だけにする。
+Linux のディストリビューションは Swift ランタイムを入れていないことが多く、fcitx5 のプロセスに
+別の版の Swift ランタイムが入り込む事態も避けたいからである。
+
+- 共有ライブラリでは、自動リンクの対象が `libFoundation.a` で止まる。そこで Foundation の静的依存
+  （ICU・Collections・CShims・CoreFoundation・Synchronization）を、リンカのグループに明示的に並べる。
+  `-z defs` を付けてあるので、シンボルが 1 つでも欠ければリンクの時点で失敗する
+  （付けないと、fcitx5 が dlopen した時点で初めて失敗する。実際に `uloc_minimizeSubtags` で起きた）
+- バージョンスクリプト（`linux/libvimeu.map`）で、外から見えるシンボルを C API の `vimeu_*` に絞る。
+  エクスポートは 1,136 から 41（C API 19 + vimeu 自身の型記述子など 22）に減った
+- サイズは strip 後で 56.6MB。うち 35.9MB は ICU のデータを含む `.rodata` である。
+  ファイルの写像なので、触れたページしか常駐しない（下の実測値）
+
+### 8.4 実装の範囲
+
+| 機能 | Linux |
+|---|---|
+| ローマ字・ライブ変換・n-best・部分確定・自動確定・数字の全角/半角・Control+J/K/M・Alt+Space | 実装済み（macOS の Option+Space は Alt+Space） |
+| 確定直後の Backspace / Control+Backspace による再変換 | 実装済み。クライアントごとの確認は未実施（docs/client-quirks-linux.md） |
+| ユーザー辞書の自動再読み込み | 実装済み |
+| 調整ウィンドウ（単語・共起・接続） | 未実装。Qt6/QML の別プロセス `vimeu-tune` として作る予定。Control+; と「調整...」はこれを起動する |
+| Chromium 系の 20 ms 遅延方式（`deleteThenMark`） | 移植していない。Linux（Wayland）で必要かどうかは実機で確かめる |
+
+### 8.5 検証（2026-11-22、AMD Ryzen 5 PRO 3500U、Arch Linux、Swift 6.2.1、fcitx5 5.1.23）
+
+1. **辞書の一致** — Mozc `1527a4c`（2026-11-20）の `src/data` から作った `vimeu.dic` は、
+   トークン 1,215,479 / 読み 739,398 / 表層 978,579 / 品詞 2,672 / 52.3MB で、`verify` は差分ゼロ
+2. **変換精度** — 同じ Mozc の版で比べると、§3.6 の 9 つの数値が小数第 2 位まで一致した。
+   したがって、変換コアは Linux でも同じ結果を出している
+
+   | Mozc の `src/data` | Wikipedia 文字 / 文 / top-5 | 会話文 文字 / 文 / top-5 | mozc_evaluation 文字 / 文 / top-5 |
+   |---|---|---|---|
+   | `c08fbbd`（2026-07-15。§3.6 の測定時点） | 84.47 / 34.63 / 46.72 | 89.44 / 40.76 / 54.66 | 97.66 / 91.14 / 96.04 |
+   | `1527a4c`（2026-11-20） | 84.52 / 34.73 / 46.81 | 89.45 / 40.88 / 54.69 | 97.74 / 91.38 / 96.04 |
+
+   差が出たのは Mozc のデータが更新されたためで、プラットフォームの違いではない。
+   Wikipedia テストセットでの速度は 1,482.6 文/秒（release、上の CPU）
+3. **単体テスト** — Linux でも `swift test` が通る（XCTest 119 件、Swift Testing 53 件）。
+   `VimeuSessionTests` が §4.1 の操作表をキー列として再生し、偽のクライアントで結果を確かめる
+4. **fcitx5 のエンドツーエンド** — `linux/fcitx5/test/testvimeu` が、本物の fcitx5 `Instance` に
+   ビルドツリーのアドオンを読み込ませ、testfrontend からキーを送る。確認する内容は次のとおり。
+   切り替え、Control+K と確定、surrounding text での再変換（`DeleteSurrounding: -2 2`）、
+   照合が合わないときにアプリへ通すこと、Alt+Space、ライブ変換のインライン表示、候補とページ内の数字選択、
+   ユーザー辞書の書き換えが再起動なしに効くこと（`かわ` の 1 位が `川` → `皮`）。
+   テストは利用者の fcitx5 設定もユーザー辞書も読まない
+5. **常駐メモリ** — 上のテストで変換を数回した直後の smaps では、`vimeu.dic` の常駐が 16.4MB、
+   `libvimeu.so` の常駐が 9.8MB、プロセス全体の RSS が 35.2MB だった。
+   §5-7 の 176KB は起動直後の値なので、条件が違う

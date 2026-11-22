@@ -1,0 +1,79 @@
+# vimeu for fcitx5 — local -git package built from this repository's `linux`
+# branch (commit your changes first: makepkg clones the repository).
+#   cd linux/packaging/arch && makepkg -si
+pkgname=fcitx5-vimeu-git
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Japanese kana-kanji conversion for fcitx5 on Mozc'"'"'s dictionary and cost model'
+arch=('x86_64')
+url='https://github.com/eswai/Vimeu'
+license=('BSD-3-Clause' 'LicenseRef-NAIST-IPAdic' 'LicenseRef-ICOT' 'LicenseRef-Okinawa-Dictionary')
+depends=('fcitx5' 'glibc' 'gcc-libs')
+# Any Swift >= 6.2 toolchain on PATH works; swift-bin (AUR) is the usual one.
+makedepends=('git' 'cmake' 'swift-bin')
+provides=('fcitx5-vimeu')
+conflicts=('fcitx5-vimeu')
+# The Swift runtime is linked statically into libvimeu.so; LTO/makepkg's
+# CFLAGS do not apply to the Swift part.
+options=('!lto')
+
+# Mozc's src/data, pinned to the revision this build was verified against
+# (make verify-dict; accuracy in DESIGN.md §8). Only the files vimeu reads.
+_mozc=1527a4cd1217cec4611cd4bc8d46f8c66ea79e6a
+_mozc_raw="https://raw.githubusercontent.com/google/mozc/${_mozc}/src/data"
+
+source=("vimeu::git+file://${startdir}/../../..#branch=linux"
+        "mozc-boundary.def::${_mozc_raw}/rules/boundary.def"
+        "mozc-id.def::${_mozc_raw}/dictionary_oss/id.def"
+        "mozc-connection_single_column.txt::${_mozc_raw}/dictionary_oss/connection_single_column.txt")
+sha256sums=('SKIP'
+            '756608fa8359c9a8c0af5661522412db860939f32833a4cb75ff63219d8dbd14'
+            '07a05a268c3783b7e02b36e4aa591555a2dd19a1f3c93891576740761c154f2d'
+            '68823a1f6617372ccb89afdbcb334d7a0bcfa82c9c5dda03fc1f80f1cab5c48e')
+for _i in 0 1 2 3 4 5 6 7 8 9; do
+    source+=("mozc-dictionary0${_i}.txt::${_mozc_raw}/dictionary_oss/dictionary0${_i}.txt")
+done
+sha256sums+=('9e07ce292932c4fff327ed8cb06274c09acca556bd8bdf7c7ef1f6173eae3b61'
+             '836fd5fd8399510de0d8ef7b33be913cca6bbaee7b712cc8045fba03f4c75a89'
+             '93943858d0cfd092b849a78def6901eaf228177e1ac5663544e865a3a1e45a9e'
+             'cb9f1b0b4a7550d682d86244a021cd17e0b15366328819e69135b5f183a1a24b'
+             '9fdc4e3948d03463de13ab5782adffbc11dd06e934cb80138c5920029cd3d2f6'
+             '199e3b0f050b691823ae7ba943090d437f51af6436b27c5f3dc69cafa12000e4'
+             'b95b14f7770ae2a824bc8e9fad8b03c1bc45c504f93a36554b8b56daa0368d2a'
+             '7f53649b529d4c8c495d3a8dd9c4d489dfe7696080f7423107ff01331174be48'
+             '50a31bb5fc1646721b00be371a5695dffab1292bda143e1e59cc70cbbdd8643f'
+             '4e5fcd4cbfbf11395166a37b506f547fc54d20edc0884f5184ecd3fc705f0d9a')
+
+pkgver() {
+    cd vimeu
+    printf '0.1.0.r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+    # Rebuild Mozc's directory layout; vimeu-dictbuild reads it as-is.
+    local data="$srcdir/vimeu/dict/mozc"
+    mkdir -p "$data/dictionary_oss" "$data/rules"
+    cp "$srcdir/mozc-boundary.def" "$data/rules/boundary.def"
+    cp "$srcdir/mozc-id.def" "$data/dictionary_oss/id.def"
+    cp "$srcdir/mozc-connection_single_column.txt" "$data/dictionary_oss/connection_single_column.txt"
+    for _i in 0 1 2 3 4 5 6 7 8 9; do
+        cp "$srcdir/mozc-dictionary0${_i}.txt" "$data/dictionary_oss/dictionary0${_i}.txt"
+    done
+}
+
+build() {
+    cd vimeu
+    make linux-build PREFIX=/usr
+    make verify-dict
+}
+
+check() {
+    cd vimeu
+    swift test
+    build/fcitx5/test/testvimeu
+}
+
+package() {
+    cd vimeu
+    make linux-install PREFIX=/usr DESTDIR="$pkgdir"
+}

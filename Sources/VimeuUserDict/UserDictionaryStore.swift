@@ -47,8 +47,21 @@ public final class UserDictionaryStore: @unchecked Sendable {
     /// The per-user location. Under App Sandbox this resolves inside the app's
     /// container automatically, so it needs no entitlement.
     public static func defaultDirectory() -> URL {
+        #if os(Linux)
+        // XDG Base Directory: $XDG_DATA_HOME/vimeu, default ~/.local/share/vimeu.
+        let env = ProcessInfo.processInfo.environment
+        let base: URL
+        if let xdg = env["XDG_DATA_HOME"], xdg.hasPrefix("/") {
+            base = URL(fileURLWithPath: xdg, isDirectory: true)
+        } else {
+            base = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".local/share", isDirectory: true)
+        }
+        return base.appendingPathComponent("vimeu", isDirectory: true)
+        #else
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("VimeuIME", isDirectory: true)
+        #endif
     }
 
     private var wordURL: URL { directory.appendingPathComponent("user_word.tsv") }

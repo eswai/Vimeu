@@ -66,7 +66,13 @@ func expandGlob(_ pattern: String) -> [String] {
     var g = glob_t()
     defer { globfree(&g) }
     guard glob(pattern, 0, nil, &g) == 0 else { return [] }
-    return (0..<Int(g.gl_matchc)).compactMap { i in
+    // gl_matchc is BSD-only; glibc counts matches in gl_pathc.
+    #if os(Linux)
+    let count = Int(g.gl_pathc)
+    #else
+    let count = Int(g.gl_matchc)
+    #endif
+    return (0..<count).compactMap { i in
         g.gl_pathv[i].map { String(cString: $0) }
     }.sorted()
 }

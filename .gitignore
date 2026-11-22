@@ -13,3 +13,6 @@ dict/*.dic
 # Corpora used only for accuracy regression.
 corpus/*.txt
 corpus/*.jsonl
+
+# Linux build tree (fcitx5 addon)
+build/

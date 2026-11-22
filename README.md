@@ -227,6 +227,26 @@ swift run -c release vimeu-eval --dic dict/vimeu.dic --testset corpus/testset.ts
 IME プロセスはブレークポイントで止めるとデスクトップごと固まるため、
 ロジックの検証は単体テストと CLI で行うこと。
 
+## Linux（fcitx5）
+
+fcitx5 のアドオンとして動く。変換コアは macOS 版と同じ Swift のコードで、精度も同じになる
+（同じ Mozc のデータで、テストセットの数値が一致することを確かめた。[DESIGN.md](DESIGN.md) §8）。
+
+必要なもの：Swift 6.2 以降、cmake、fcitx5 5.1 以降（開発用ヘッダを含む）、Mozc の `src/data`（上と同じ）。
+
+```sh
+make linux-test                       # libvimeu.so とアドオンをビルドし、Swift のテストと fcitx5 の E2E テストを走らせる
+make linux-dev-run                    # ビルドツリーのアドオンを読み込んだ fcitx5 に置き換えて起動する
+sudo make linux-install PREFIX=/usr   # /usr/lib/fcitx5, /usr/lib/vimeu, /usr/share/vimeu に入れる
+```
+
+Arch Linux では `linux/packaging/arch/PKGBUILD` で `makepkg -si` もできる。
+
+インストールしたら、`fcitx5-configtool` で入力メソッド「vimeu」を追加する。設定（ライブ変換、部分確定など）も
+fcitx5-configtool から変更できる。キー操作は上の表と同じで、Option+Space は Alt+Space になる。
+ユーザー辞書は `~/.local/share/vimeu/` にあり、書き換えると fcitx5 を再起動せずに反映される。
+調整ウィンドウは Linux 版にはまだ無い。
+
 ## ライセンスと出典
 
 vimeu の独自コードは [BSD 3-Clause License](LICENSE) で公開する。

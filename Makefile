@@ -113,3 +113,43 @@ install: build verify-bundle
 clean:
 	rm -rf .build $(APP_BUNDLE)
 	rm -f $(DIC)
+
+# ── Linux (fcitx5) ────────────────────────────────────────────────────────────
+# DESIGN.md §8. libvimeu.so (Swift core + C API) is loaded by the fcitx5 addon
+# built from linux/fcitx5. The macOS targets above are not used on Linux.
+FCITX_BUILD := $(REPO_ROOT)/build/fcitx5
+PREFIX      ?= /usr
+DESTDIR     ?=
+
+.PHONY: linux-build linux-test linux-dev-run linux-install
+
+linux-build: $(DIC)
+	@echo "==> Building libvimeu.so (Swift, release)"
+	swift build -c release --product vimeu
+	@echo "==> Building the fcitx5 addon"
+	cmake -S linux/fcitx5 -B $(FCITX_BUILD) -DCMAKE_BUILD_TYPE=RelWithDebInfo -DVIMEU_DEV_RUNPATH=ON \
+		-DCMAKE_INSTALL_PREFIX=$(PREFIX)
+	cmake --build $(FCITX_BUILD)
+
+# Swift unit tests, then a real fcitx5 Instance driving the addon through the
+# testfrontend module (user config and dictionary are not touched).
+linux-test: linux-build
+	swift test
+	$(FCITX_BUILD)/test/testvimeu
+
+# Replace the running fcitx5 with one that loads the addon straight from the
+# build tree. Add "vimeu" in fcitx5-configtool, then try it in real apps.
+linux-dev-run: linux-build
+	VIMEU_DIC=$(DIC) \
+	FCITX_ADDON_DIRS=$(FCITX_BUILD)/lib/fcitx5:/usr/lib/fcitx5 \
+	XDG_DATA_DIRS=$(FCITX_BUILD)/share:$${XDG_DATA_DIRS:-/usr/local/share:/usr/share} \
+	fcitx5 -rd
+
+linux-install: linux-build
+	cmake -S linux/fcitx5 -B $(FCITX_BUILD) -DVIMEU_DEV_RUNPATH=OFF
+	cmake --build $(FCITX_BUILD)
+	DESTDIR=$(DESTDIR) cmake --install $(FCITX_BUILD) --strip
+	strip --strip-unneeded "$(DESTDIR)$(PREFIX)/lib/vimeu/libvimeu.so"
+	install -Dm644 $(DIC) "$(DESTDIR)$(PREFIX)/share/vimeu/vimeu.dic"
+	install -Dm644 LICENSE "$(DESTDIR)$(PREFIX)/share/licenses/vimeu/LICENSE"
+	install -Dm644 THIRD_PARTY_NOTICES.md "$(DESTDIR)$(PREFIX)/share/licenses/vimeu/THIRD_PARTY_NOTICES.md"

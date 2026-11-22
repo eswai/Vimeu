@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+# VIMEU_TUNE_BUILD picks another build directory (the install build).
+BUILD="${VIMEU_TUNE_BUILD:-$ROOT/build}"
+mkdir -p "$BUILD"
+cd "$BUILD"
+
+qmake6 "$ROOT/vimeu-tune.pro" "$@"
+make -j"$(nproc)"
+
+echo "Built $BUILD/vimeu-tune"

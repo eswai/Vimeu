@@ -118,8 +118,11 @@ clean:
 # DESIGN.md §8. libvimeu.so (Swift core + C API) is loaded by the fcitx5 addon
 # built from linux/fcitx5. The macOS targets above are not used on Linux.
 FCITX_BUILD := $(REPO_ROOT)/build/fcitx5
+TUNE_BIN    := $(REPO_ROOT)/linux/tune/build/vimeu-tune
 PREFIX      ?= /usr
 DESTDIR     ?=
+# Extra fcitx5 flags for linux-dev-run, e.g. FCITX_ARGS="--disable notificationitem".
+FCITX_ARGS  ?=
 
 .PHONY: linux-build linux-test linux-dev-run linux-install
 
@@ -130,20 +133,27 @@ linux-build: $(DIC)
 	cmake -S linux/fcitx5 -B $(FCITX_BUILD) -DCMAKE_BUILD_TYPE=RelWithDebInfo -DVIMEU_DEV_RUNPATH=ON \
 		-DCMAKE_INSTALL_PREFIX=$(PREFIX)
 	cmake --build $(FCITX_BUILD)
+	@echo "==> Building vimeu-tune"
+	env -u LD_LIBRARY_PATH linux/tune/bin/build
 
 # Swift unit tests, then a real fcitx5 Instance driving the addon through the
-# testfrontend module (user config and dictionary are not touched).
+# testfrontend module (user config and dictionary are not touched), then the
+# tuning app's tests, offscreen.
 linux-test: linux-build
 	swift test
 	$(FCITX_BUILD)/test/testvimeu
+	env -u LD_LIBRARY_PATH linux/tune/bin/test
 
 # Replace the running fcitx5 with one that loads the addon straight from the
-# build tree. Add "vimeu" in fcitx5-configtool, then try it in real apps.
+# build tree, logging to this terminal (no -d). Add "vimeu" in
+# fcitx5-configtool, then try it in real apps. Ctrl+C stops it; start the
+# normal one again with `fcitx5 -rd`. LD_LIBRARY_PATH is cleared so a Swift
+# toolchain's compatibility libraries do not leak into fcitx5.
 linux-dev-run: linux-build
-	VIMEU_DIC=$(DIC) \
+	env -u LD_LIBRARY_PATH VIMEU_DIC=$(DIC) VIMEU_TUNE=$(TUNE_BIN) \
 	FCITX_ADDON_DIRS=$(FCITX_BUILD)/lib/fcitx5:/usr/lib/fcitx5 \
 	XDG_DATA_DIRS=$(FCITX_BUILD)/share:$${XDG_DATA_DIRS:-/usr/local/share:/usr/share} \
-	fcitx5 -rd
+	fcitx5 -r --verbose=vimeu=5 $(FCITX_ARGS)
 
 linux-install: linux-build
 	cmake -S linux/fcitx5 -B $(FCITX_BUILD) -DVIMEU_DEV_RUNPATH=OFF
@@ -151,5 +161,31 @@ linux-install: linux-build
 	DESTDIR=$(DESTDIR) cmake --install $(FCITX_BUILD) --strip
 	strip --strip-unneeded "$(DESTDIR)$(PREFIX)/lib/vimeu/libvimeu.so"
 	install -Dm644 $(DIC) "$(DESTDIR)$(PREFIX)/share/vimeu/vimeu.dic"
+	env -u LD_LIBRARY_PATH VIMEU_TUNE_BUILD=$(REPO_ROOT)/build/tune-install linux/tune/bin/build \
+		CONFIG+=vimeu_install VIMEU_CORE_INSTALL_DIR=$(PREFIX)/lib/vimeu
+	install -Dm755 -s $(REPO_ROOT)/build/tune-install/vimeu-tune "$(DESTDIR)$(PREFIX)/bin/vimeu-tune"
+	install -Dm644 linux/tune/share/vimeu-tune.desktop "$(DESTDIR)$(PREFIX)/share/applications/vimeu-tune.desktop"
+	install -Dm644 linux/tune/share/vimeu-tune.svg "$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/vimeu-tune.svg"
 	install -Dm644 LICENSE "$(DESTDIR)$(PREFIX)/share/licenses/vimeu/LICENSE"
 	install -Dm644 THIRD_PARTY_NOTICES.md "$(DESTDIR)$(PREFIX)/share/licenses/vimeu/THIRD_PARTY_NOTICES.md"
+
+# When a systemd user unit supervises fcitx5 (Omarchy: omarchy-fcitx5.service,
+# Restart=always plus D-Bus activation), a hand-started fcitx5 is replaced
+# within seconds. Instead, point that unit at the build tree with a runtime
+# drop-in (under $XDG_RUNTIME_DIR, gone on reboot) and restart it. Logs go to
+# `journalctl --user -u $(FCITX_UNIT) -f`. linux-dev-service-off undoes it.
+FCITX_UNIT    ?= omarchy-fcitx5.service
+FCITX_DROPIN  := $(XDG_RUNTIME_DIR)/systemd/user/$(FCITX_UNIT).d/vimeu-dev.conf
+
+.PHONY: linux-dev-service linux-dev-service-off
+linux-dev-service: linux-build
+	mkdir -p "$(dir $(FCITX_DROPIN))"
+	printf '[Service]\nEnvironment=VIMEU_DIC=%s\nEnvironment=VIMEU_TUNE=%s\nEnvironment=FCITX_ADDON_DIRS=%s:/usr/lib/fcitx5\nEnvironment=XDG_DATA_DIRS=%s:/usr/local/share:/usr/share\n' \
+		"$(DIC)" "$(TUNE_BIN)" "$(FCITX_BUILD)/lib/fcitx5" "$(FCITX_BUILD)/share" > "$(FCITX_DROPIN)"
+	systemctl --user daemon-reload
+	systemctl --user restart $(FCITX_UNIT)
+
+linux-dev-service-off:
+	rm -f "$(FCITX_DROPIN)"
+	systemctl --user daemon-reload
+	systemctl --user restart $(FCITX_UNIT)

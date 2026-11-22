@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <filesystem>
 #include <cstring>
 #include <ctime>
@@ -396,7 +397,9 @@ void VimeuEngine::updateLiveAction() {
 }
 
 void VimeuEngine::openTuner(const char *reading) {
-    std::vector<std::string> args{"vimeu-tune"};
+    // $VIMEU_TUNE points a development fcitx5 at the build tree's binary.
+    const char *tune = std::getenv("VIMEU_TUNE");
+    std::vector<std::string> args{tune && *tune ? tune : "vimeu-tune"};
     if (reading && *reading) {
         args.push_back("--reading");
         args.push_back(reading);

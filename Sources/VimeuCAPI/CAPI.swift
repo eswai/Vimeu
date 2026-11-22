@@ -273,3 +273,44 @@ public func vimeu_session_toggle_live_conversion(_ p: OpaquePointer?) {
 public func vimeu_session_open_tuner(_ p: OpaquePointer?) {
     sessionBox(p)?.session.openTuner()
 }
+
+// MARK: - Tuner
+
+@_cdecl("vimeu_tuner_open")
+public func vimeu_tuner_open(_ dictionaryPath: UnsafePointer<CChar>?, _ userDir: UnsafePointer<CChar>?) -> OpaquePointer? {
+    let engine = Engine(dictionaryPath: string(dictionaryPath) ?? Engine.defaultDictionaryPath(),
+                        userDirectory: string(userDir))
+    return OpaquePointer(Unmanaged.passRetained(Tuner(engine: engine)).toOpaque())
+}
+
+@_cdecl("vimeu_tuner_close")
+public func vimeu_tuner_close(_ p: OpaquePointer?) {
+    guard let p else { return }
+    Unmanaged<Tuner>.fromOpaque(UnsafeRawPointer(p)).release()
+}
+
+private func tuner(_ p: OpaquePointer?) -> Tuner? {
+    p.map { Unmanaged<Tuner>.fromOpaque(UnsafeRawPointer($0)).takeUnretainedValue() }
+}
+
+@_cdecl("vimeu_tuner_state")
+public func vimeu_tuner_state(_ p: OpaquePointer?) -> UnsafeMutablePointer<CChar>? {
+    strdup(tuner(p)?.stateJSON ?? "{}")
+}
+
+@_cdecl("vimeu_tuner_run")
+public func vimeu_tuner_run(_ p: OpaquePointer?, _ command: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
+    guard let t = tuner(p) else { return strdup("no tuner") }
+    guard let command else { return strdup("no command") }
+    do {
+        try t.run(json: String(cString: command))
+        return nil
+    } catch {
+        return strdup("\(error)")
+    }
+}
+
+@_cdecl("vimeu_string_free")
+public func vimeu_string_free(_ s: UnsafeMutablePointer<CChar>?) {
+    free(s)
+}

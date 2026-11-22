@@ -8,7 +8,7 @@ pkgdesc='Japanese kana-kanji conversion for fcitx5 on Mozc'"'"'s dictionary and 
 arch=('x86_64')
 url='https://github.com/eswai/Vimeu'
 license=('BSD-3-Clause' 'LicenseRef-NAIST-IPAdic' 'LicenseRef-ICOT' 'LicenseRef-Okinawa-Dictionary')
-depends=('fcitx5' 'glibc' 'gcc-libs')
+depends=('fcitx5' 'glibc' 'gcc-libs' 'qt6-base' 'qt6-declarative' 'qt6-wayland')
 # Any Swift >= 6.2 toolchain on PATH works; swift-bin (AUR) is the usual one.
 makedepends=('git' 'cmake' 'swift-bin')
 provides=('fcitx5-vimeu')
@@ -71,6 +71,7 @@ check() {
     cd vimeu
     swift test
     build/fcitx5/test/testvimeu
+    linux/tune/bin/test
 }
 
 package() {

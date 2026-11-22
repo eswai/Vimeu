@@ -118,6 +118,23 @@ void vimeu_session_highlight_candidate(vimeu_session *session, int32_t index);
 void vimeu_session_toggle_live_conversion(vimeu_session *session);
 void vimeu_session_open_tuner(vimeu_session *session);
 
+/* ── Tuning (vimeu-tune) ──────────────────────────────────────────────────
+ * The tuning window's model. State and commands are JSON so this boundary
+ * stays small; see Sources/VimeuSession/Tuner.swift for the fields. Edits are
+ * saved to the user dictionary at once; the fcitx5 addon reloads it. */
+typedef struct vimeu_tuner vimeu_tuner;
+
+/* Same path rules as vimeu_engine_open. Never returns NULL; without a
+ * dictionary the state's "ready" is false and "message" says why. */
+vimeu_tuner *vimeu_tuner_open(const char *dictionary_path, const char *user_dir);
+void vimeu_tuner_close(vimeu_tuner *tuner);
+/* The whole state as a JSON object. Free with vimeu_string_free. */
+char *vimeu_tuner_state(vimeu_tuner *tuner);
+/* Run one command, e.g. {"op":"boostWord","reading":"かわ","surface":"皮","steps":1}.
+ * Returns NULL on success, or an error message to free with vimeu_string_free. */
+char *vimeu_tuner_run(vimeu_tuner *tuner, const char *command_json);
+void vimeu_string_free(char *s);
+
 #ifdef __cplusplus
 }
 #endif

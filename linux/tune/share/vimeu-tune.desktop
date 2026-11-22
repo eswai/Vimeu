@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=vimeu Tune
+Name[ja]=vimeu 調整
+Comment=Tune vimeu's conversion: word, collocation and connection costs
+Comment[ja]=vimeu の変換を調整する（単語・共起・接続のコスト）
+Exec=vimeu-tune
+Icon=vimeu-tune
+Terminal=false
+Categories=Utility;Settings;
+StartupWMClass=vimeu-tune

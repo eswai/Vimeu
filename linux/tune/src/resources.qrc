@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="Main.qml">Main.qml</file>
+        <file alias="WordPane.qml">WordPane.qml</file>
+        <file alias="CollocationPane.qml">CollocationPane.qml</file>
+        <file alias="ConnectionPane.qml">ConnectionPane.qml</file>
+        <file alias="CostField.qml">CostField.qml</file>
+    </qresource>
+</RCC>

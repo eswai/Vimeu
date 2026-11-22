@@ -19,6 +19,12 @@ macOS の [client-quirks.md](client-quirks.md) と同じく、結果には確か
 
 ## 調べ方
 
-`make linux-dev-run` で起動した fcitx5 はログを端末に出す（`-d`）。vimeu のログはカテゴリ `vimeu` に出る。
-再変換が通常の Backspace になったときは、fcitx5 の `--verbose=vimeu=5,default=5` で surrounding text が
-来ているかどうかを見る。
+`make linux-dev-run` で起動した fcitx5 は、デーモンにならずにログを端末に出す。vimeu のログはカテゴリ `vimeu` に出る
+（`--verbose=vimeu=5`）。止めるときは Ctrl+C を押し、普段の fcitx5 を `fcitx5 -rd` で起動し直す。
+再変換が通常の Backspace になったときは、`--verbose=vimeu=5,default=5` にして、surrounding text が来ているかを見る。
+
+fcitx5 を systemd のユーザーユニットが管理している環境（Omarchy の `omarchy-fcitx5.service` は `Restart=always` で、
+D-Bus の自動起動もこのユニットに向いている）では、`make linux-dev-run` で起動した fcitx5 は数秒で置き換えられる
+（2026-11-22 に確認）。その場合は `make linux-dev-service` を使う。ユニットに一時的な drop-in
+（`$XDG_RUNTIME_DIR` の下に置くので再起動で消える）を足してビルドツリーを読ませ、ユニットを再起動する。
+ログは `journalctl --user -u omarchy-fcitx5.service -f` で見る。元に戻すときは `make linux-dev-service-off` を使う。

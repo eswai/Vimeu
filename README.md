@@ -237,6 +237,7 @@ fcitx5 のアドオンとして動く。変換コアは macOS 版と同じ Swift
 ```sh
 make linux-test                       # libvimeu.so とアドオンをビルドし、Swift のテストと fcitx5 の E2E テストを走らせる
 make linux-dev-run                    # ビルドツリーのアドオンを読み込んだ fcitx5 に置き換えて起動する
+make linux-dev-service                # fcitx5 を systemd が管理している場合（Omarchy）はこちら。戻すときは linux-dev-service-off
 sudo make linux-install PREFIX=/usr   # /usr/lib/fcitx5, /usr/lib/vimeu, /usr/share/vimeu に入れる
 ```
 
@@ -245,7 +246,8 @@ Arch Linux では `linux/packaging/arch/PKGBUILD` で `makepkg -si` もできる
 インストールしたら、`fcitx5-configtool` で入力メソッド「vimeu」を追加する。設定（ライブ変換、部分確定など）も
 fcitx5-configtool から変更できる。キー操作は上の表と同じで、Option+Space は Alt+Space になる。
 ユーザー辞書は `~/.local/share/vimeu/` にあり、書き換えると fcitx5 を再起動せずに反映される。
-調整ウィンドウは Linux 版にはまだ無い。
+調整ウィンドウは別アプリの `vimeu-tune` で、Control+; か、入力メソッドのメニューの「調整...」で開く
+（[linux/tune/README.md](linux/tune/README.md)）。
 
 ## ライセンスと出典
 

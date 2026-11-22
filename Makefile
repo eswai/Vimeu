@@ -124,7 +124,7 @@ DESTDIR     ?=
 # Extra fcitx5 flags for linux-dev-run, e.g. FCITX_ARGS="--disable notificationitem".
 FCITX_ARGS  ?=
 
-.PHONY: linux-build linux-test linux-dev-run linux-install
+.PHONY: linux-build linux-build-install linux-test linux-dev-run linux-install
 
 linux-build: $(DIC)
 	@echo "==> Building libvimeu.so (Swift, release)"
@@ -155,15 +155,28 @@ linux-dev-run: linux-build
 	XDG_DATA_DIRS=$(FCITX_BUILD)/share:$${XDG_DATA_DIRS:-/usr/local/share:/usr/share} \
 	fcitx5 -r --verbose=vimeu=5 $(FCITX_ARGS)
 
-linux-install: linux-build
-	cmake -S linux/fcitx5 -B $(FCITX_BUILD) -DVIMEU_DEV_RUNPATH=OFF
-	cmake --build $(FCITX_BUILD)
-	DESTDIR=$(DESTDIR) cmake --install $(FCITX_BUILD) --strip
+# Release builds for installing, in their own directories so the development
+# builds (and their tests, which load libvimeu.so from the build tree) stay
+# as they are: RUNPATH is only $(PREFIX)/lib/vimeu, tests are not built.
+FCITX_INSTALL_BUILD := $(REPO_ROOT)/build/fcitx5-install
+TUNE_INSTALL_BUILD  := $(REPO_ROOT)/build/tune-install
+
+linux-build-install: linux-build
+	cmake -S linux/fcitx5 -B $(FCITX_INSTALL_BUILD) -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+		-DCMAKE_INSTALL_PREFIX=$(PREFIX) -DVIMEU_DEV_RUNPATH=OFF -DBUILD_TESTING=OFF
+	cmake --build $(FCITX_INSTALL_BUILD)
+	env -u LD_LIBRARY_PATH VIMEU_TUNE_BUILD=$(TUNE_INSTALL_BUILD) linux/tune/bin/build \
+		CONFIG+=vimeu_install VIMEU_CORE_INSTALL_DIR=$(PREFIX)/lib/vimeu
+
+# Copies only; builds nothing, so it is safe under sudo or fakeroot:
+#   make linux-build-install && sudo make linux-install
+linux-install:
+	@test -x $(TUNE_INSTALL_BUILD)/vimeu-tune -a -f $(FCITX_INSTALL_BUILD)/cmake_install.cmake -a -s $(DIC) \
+		|| { echo "ERROR: run 'make linux-build-install PREFIX=$(PREFIX)' first"; exit 1; }
+	DESTDIR=$(DESTDIR) cmake --install $(FCITX_INSTALL_BUILD) --strip
 	strip --strip-unneeded "$(DESTDIR)$(PREFIX)/lib/vimeu/libvimeu.so"
 	install -Dm644 $(DIC) "$(DESTDIR)$(PREFIX)/share/vimeu/vimeu.dic"
-	env -u LD_LIBRARY_PATH VIMEU_TUNE_BUILD=$(REPO_ROOT)/build/tune-install linux/tune/bin/build \
-		CONFIG+=vimeu_install VIMEU_CORE_INSTALL_DIR=$(PREFIX)/lib/vimeu
-	install -Dm755 -s $(REPO_ROOT)/build/tune-install/vimeu-tune "$(DESTDIR)$(PREFIX)/bin/vimeu-tune"
+	install -Dm755 -s $(TUNE_INSTALL_BUILD)/vimeu-tune "$(DESTDIR)$(PREFIX)/bin/vimeu-tune"
 	install -Dm644 linux/tune/share/vimeu-tune.desktop "$(DESTDIR)$(PREFIX)/share/applications/vimeu-tune.desktop"
 	install -Dm644 linux/tune/share/vimeu-tune.svg "$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/vimeu-tune.svg"
 	install -Dm644 LICENSE "$(DESTDIR)$(PREFIX)/share/licenses/vimeu/LICENSE"

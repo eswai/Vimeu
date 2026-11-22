@@ -238,7 +238,7 @@ fcitx5 のアドオンとして動く。変換コアは macOS 版と同じ Swift
 make linux-test                       # libvimeu.so とアドオンをビルドし、Swift のテストと fcitx5 の E2E テストを走らせる
 make linux-dev-run                    # ビルドツリーのアドオンを読み込んだ fcitx5 に置き換えて起動する
 make linux-dev-service                # fcitx5 を systemd が管理している場合（Omarchy）はこちら。戻すときは linux-dev-service-off
-sudo make linux-install PREFIX=/usr   # /usr/lib/fcitx5, /usr/lib/vimeu, /usr/share/vimeu に入れる
+make linux-build-install PREFIX=/usr && sudo make linux-install PREFIX=/usr   # /usr/lib/fcitx5, /usr/lib/vimeu, /usr/bin などに入れる
 ```
 
 Arch Linux では `linux/packaging/arch/PKGBUILD` で `makepkg -si` もできる。

@@ -2,7 +2,7 @@
 # branch (commit your changes first: makepkg clones the repository).
 #   cd linux/packaging/arch && makepkg -si
 pkgname=fcitx5-vimeu-git
-pkgver=0.1.0
+pkgver=0.1.0.r36.a5a17e8
 pkgrel=1
 pkgdesc='Japanese kana-kanji conversion for fcitx5 on Mozc'"'"'s dictionary and cost model'
 arch=('x86_64')
@@ -14,7 +14,8 @@ makedepends=('git' 'cmake' 'swift-bin')
 provides=('fcitx5-vimeu')
 conflicts=('fcitx5-vimeu')
 # The Swift runtime is linked statically into libvimeu.so; LTO/makepkg's
-# CFLAGS do not apply to the Swift part.
+# CFLAGS do not apply to the Swift part. package() only copies: swift-build
+# crashes under fakeroot.
 options=('!lto')
 
 # Mozc's src/data, pinned to the revision this build was verified against
@@ -63,7 +64,7 @@ prepare() {
 
 build() {
     cd vimeu
-    make linux-build PREFIX=/usr
+    make linux-build-install PREFIX=/usr
     make verify-dict
 }
 

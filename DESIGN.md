@@ -932,6 +932,12 @@ Linux のディストリビューションは Swift ランタイムを入れて�
   （付けないと、fcitx5 が dlopen した時点で初めて失敗する。実際に `uloc_minimizeSubtags` で起きた）
 - バージョンスクリプト（`linux/libvimeu.map`）で、外から見えるシンボルを C API の `vimeu_*` に絞る。
   エクスポートは 1,136 から 41（C API 19 + vimeu 自身の型記述子など 22）に減った
+- SONAME を `libvimeu.so` にする。SONAME がない共有ライブラリをパスで指定してリンクすると、
+  リンカはそのパスを `DT_NEEDED` に記録し、実行時に RUNPATH を使わない。実際に、アドオンが
+  ビルドツリーの絶対パスを指したままパッケージに入っていた（makepkg の `$srcdir` 警告で発覚）。
+  `make linux-build-install` は、インストールする 2 つのバイナリの `DT_NEEDED` にパスが含まれていれば失敗する
+- `make linux-install` はコピーだけを行い、何もビルドしない。makepkg の `package()` は fakeroot の中で動き、
+  そこで `swift build` を実行すると Swift の処理系がクラッシュするためである。sudo で root が Swift を動かすこともなくなる
 - サイズは strip 後で 56.6MB。うち 35.9MB は ICU のデータを含む `.rodata` である。
   ファイルの写像なので、触れたページしか常駐しない（下の実測値）
 
@@ -999,4 +1005,12 @@ macOS 版のように IME と同じプロセスには置けない。2 つのプ�
   さらに、本物の QML を画面外で読み込み、警告が出ないことも確かめる。
   Swift 側は `TunerTests` で、候補のコストの恒等式、TSV への保存、選択が表記を追うこと、
   共起による `かわをむく` → `皮を剥く`、外部の編集の読み直しを確かめる
+
+### 8.7 パッケージ
+
+`linux/packaging/arch/PKGBUILD` は、このリポジトリの `linux` ブランチを clone してビルドする。
+Mozc のデータは必要な 13 ファイルだけを、確認したコミット（`1527a4c`）に固定して取得し、sha256 で照合する。
+`build()` で `verify-dict` を、`check()` で全テスト（Swift、fcitx5 の E2E、vimeu-tune）を実行する。
+2026-11-22 に `makepkg -d` で、パッケージ（42MB）ができるところまで確かめた。
+`-d` を付けたのは、`swift-bin`（AUR）が入っておらず、手元の Swift を使ったためである。
 

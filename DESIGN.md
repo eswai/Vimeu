@@ -949,7 +949,7 @@ Linux のディストリビューションは Swift ランタイムを入れて�
 | 確定直後の Backspace / Control+Backspace による再変換 | 実装済み。クライアントごとの確認は未実施（docs/client-quirks-linux.md） |
 | ユーザー辞書の自動再読み込み | 実装済み |
 | 調整ウィンドウ（単語・共起・接続） | 実装済み。別プロセスの `vimeu-tune`（§8.6）。「設定」ペインは無い（設定は fcitx5-configtool が持つ） |
-| Chromium 系の 20 ms 遅延方式（`deleteThenMark`） | 移植していない。Linux（Wayland）で必要かどうかは実機で確かめる |
+| Chromium 系の 20 ms 遅延方式（`deleteThenMark`） | 移植していない。Chromium（Wayland、`--enable-wayland-ime` なし）では無しで再変換でき、2 重表示も出なかった（2026-11-22、利用者の確認） |
 
 ### 8.5 検証（2026-11-22、AMD Ryzen 5 PRO 3500U、Arch Linux、Swift 6.2.1、fcitx5 5.1.23）
 

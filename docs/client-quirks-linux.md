@@ -13,7 +13,9 @@ macOS の [client-quirks.md](client-quirks.md) と同じく、結果には確か
 | foot | text-input-v3 | 未確認 | 未確認 | |
 | Ghostty | text-input-v3 / GTK | 未確認 | 未確認 | |
 | Firefox | text-input-v3 / GTK | 未確認 | 未確認 | |
-| Chromium / Electron（`--enable-wayland-ime`） | text-input-v1/v3 | 未確認 | 未確認。macOS では 20 ms の遅延が必要だった | |
+| Chromium（`--ozone-platform=wayland`、`--enable-wayland-ime` なし） | 未調査 | 動作（2026-11-22、利用者の確認） | 動作（2026-11-22、利用者の確認）。2 重表示は出ず、macOS で必要だった 20 ms の遅延は要らなかった | Control+; で vimeu-tune も開いた |
+| VS Code（Electron、起動オプションなし） | 未調査 | 動作（2026-11-22、利用者の確認） | 項目ごとには未確認 | |
+| Chromium / Electron（`--enable-wayland-ime`） | text-input-v1/v3 | 未確認 | 未確認 | |
 | GTK4 アプリ | GTK IM モジュール / text-input-v3 | 未確認 | 未確認 | |
 | Qt6 アプリ | fcitx5-qt | 未確認 | 未確認 | |
 

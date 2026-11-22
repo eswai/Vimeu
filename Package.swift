@@ -75,6 +75,9 @@ package.targets += [
             "-Xlinker", "-lCoreFoundation", "-Xlinker", "-lswiftSynchronization",
             "-Xlinker", "--end-group",
             "-Xlinker", "-z", "-Xlinker", "defs",
+            // Without a SONAME, whatever links libvimeu.so by path records
+            // that build-tree path as DT_NEEDED and ignores its RUNPATH.
+            "-Xlinker", "-soname=libvimeu.so",
             "-Xlinker", "--version-script=\(Context.packageDirectory)/linux/libvimeu.map",
         ])]
     ),

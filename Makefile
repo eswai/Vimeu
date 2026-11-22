@@ -167,6 +167,12 @@ linux-build-install: linux-build
 	cmake --build $(FCITX_INSTALL_BUILD)
 	env -u LD_LIBRARY_PATH VIMEU_TUNE_BUILD=$(TUNE_INSTALL_BUILD) linux/tune/bin/build \
 		CONFIG+=vimeu_install VIMEU_CORE_INSTALL_DIR=$(PREFIX)/lib/vimeu
+	@# An installed binary must find libvimeu.so by name through its RUNPATH,
+	@# never by a build-tree path.
+	@for f in $(FCITX_INSTALL_BUILD)/lib/fcitx5/fcitx5-vimeu.so $(TUNE_INSTALL_BUILD)/vimeu-tune; do \
+		if readelf -d "$$f" | grep NEEDED | grep -q '/'; then \
+			echo "ERROR: $$f records a library by path:"; readelf -d "$$f" | grep NEEDED | grep '/'; exit 1; fi; \
+	done
 
 # Copies only; builds nothing, so it is safe under sudo or fakeroot:
 #   make linux-build-install && sudo make linux-install

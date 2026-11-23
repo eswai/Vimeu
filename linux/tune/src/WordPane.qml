@@ -40,7 +40,7 @@ ColumnLayout {
             id: row
             required property var modelData
             width: list.width
-            height: 46
+            height: 38
             radius: Math.min(4, theme.radius)
             color: modelData.inSelected ? "#1f1f26" : "transparent"
 
@@ -55,14 +55,14 @@ ColumnLayout {
                     spacing: 0
                     Label {
                         text: row.modelData.surface + (row.modelData.ambiguous ? "（" + row.modelData.reading + "）" : "")
-                        font.pixelSize: 17
+                        font.pixelSize: 14
                         font.strikeout: row.modelData.deleted
                         font.bold: row.modelData.inSelected
                         opacity: row.modelData.deleted ? 0.5 : 1
                     }
                     Label {
                         text: row.modelData.pos || qsTr("ユーザー追加語")
-                        font.pixelSize: 11
+                        font.pixelSize: 10
                         opacity: 0.5
                         elide: Text.ElideRight
                         Layout.fillWidth: true

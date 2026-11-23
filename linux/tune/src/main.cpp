@@ -71,6 +71,11 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // Dense: Material's compact metrics (shorter fields, buttons and tabs).
+    // The default variant is sized for touch and left the window looking
+    // oversized on a desktop. An explicit setting in the environment wins.
+    if (!qEnvironmentVariableIsSet("QT_QUICK_CONTROLS_MATERIAL_VARIANT"))
+        qputenv("QT_QUICK_CONTROLS_MATERIAL_VARIANT", "Dense");
     QQuickStyle::setStyle("Material");
 
     Theme theme;

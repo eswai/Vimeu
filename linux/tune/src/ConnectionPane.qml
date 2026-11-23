@@ -16,7 +16,7 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: (st.candidates || []).length > 0
         text: qsTr("説明対象: %1").arg(((st.candidates || [])[st.selectedCandidate] || {}).text || "")
-        font.pixelSize: 16
+        font.pixelSize: 13
     }
 
     ListView {
@@ -32,7 +32,7 @@ ColumnLayout {
             id: row
             required property var modelData
             width: list.width
-            height: 50
+            height: 42
             radius: Math.min(4, theme.radius)
             color: "transparent"
 
@@ -46,13 +46,13 @@ ColumnLayout {
                     spacing: 0
                     Label {
                         text: row.modelData.left + "  →  " + row.modelData.right
-                        font.pixelSize: 17
+                        font.pixelSize: 14
                         opacity: row.modelData.disabled ? 0.5 : 1
                         font.strikeout: row.modelData.disabled
                     }
                     Label {
                         text: row.modelData.leftPOS + "  →  " + row.modelData.rightPOS
-                        font.pixelSize: 11
+                        font.pixelSize: 10
                         opacity: 0.5
                         elide: Text.ElideRight
                         Layout.fillWidth: true

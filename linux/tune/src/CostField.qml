@@ -9,7 +9,7 @@ Rectangle {
     property int maximum: 32767
 
     implicitWidth: 80
-    implicitHeight: 30
+    implicitHeight: 26
     radius: Math.min(4, theme.radius)
     color: "transparent"
     border.color: input.activeFocus ? Material.accentColor : Qt.rgba(1, 1, 1, 0.25)

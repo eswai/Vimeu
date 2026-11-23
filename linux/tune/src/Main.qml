@@ -16,6 +16,9 @@ ApplicationWindow {
     Material.theme: Material.Dark
     Material.accent: theme.accent
     Material.roundedScale: theme.radius
+    // Base size for every control and label; the fixed sizes below are set
+    // relative to it (Material's own default is 14px).
+    font.pixelSize: 13
 
     property bool helpVisible: false
     readonly property var st: backend.state
@@ -55,7 +58,7 @@ ApplicationWindow {
                 TextField {
                     id: readingField
                     Layout.fillWidth: true
-                    font.pixelSize: 20
+                    font.pixelSize: 16
                     placeholderText: qsTr("読み（ひらがな、またはローマ字で入力して Enter）")
                     text: st.reading || ""
                     onAccepted: backend.setReading(text)
@@ -115,7 +118,7 @@ ApplicationWindow {
                         required property var modelData
                         required property int index
                         width: candidateList.width
-                        height: 34
+                        height: 28
                         radius: Math.min(4, theme.radius)
                         color: index === st.selectedCandidate ? Qt.rgba(Material.accentColor.r, Material.accentColor.g, Material.accentColor.b, 0.22) : "transparent"
 
@@ -127,7 +130,7 @@ ApplicationWindow {
                             Label { text: index + 1; opacity: 0.5; Layout.preferredWidth: 32 }
                             Label {
                                 text: modelData.text
-                                font.pixelSize: 18
+                                font.pixelSize: 15
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
                             }

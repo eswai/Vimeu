@@ -46,7 +46,7 @@ ColumnLayout {
             Layout.preferredWidth: 160
             onActivated: kept = currentText
         }
-        Label { visible: leftMenu.visible; text: polarity.currentIndex === 0 ? "→" : "↔"; font.pixelSize: 18 }
+        Label { visible: leftMenu.visible; text: polarity.currentIndex === 0 ? "→" : "↔"; font.pixelSize: 15 }
         ComboBox {
             id: rightMenu
             property string kept: ""
@@ -91,7 +91,7 @@ ColumnLayout {
             id: row
             required property var modelData
             width: list.width
-            height: 40
+            height: 32
             radius: Math.min(4, theme.radius)
             color: modelData.active ? "#1f1f26" : "transparent"
             RowLayout {
@@ -101,7 +101,7 @@ ColumnLayout {
                 spacing: 12
                 Label {
                     text: row.modelData.left + (row.modelData.negative ? "  ↔  " : "  →  ") + row.modelData.right
-                    font.pixelSize: 17
+                    font.pixelSize: 14
                 }
                 Label {
                     text: row.modelData.negative ? qsTr("負の共起") : qsTr("正の共起")

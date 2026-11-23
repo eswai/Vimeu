@@ -61,10 +61,29 @@ public enum Collocation {
     }
 
     /// The content words of a candidate, in order, as indices into `segments`.
+    ///
+    /// One exception to `isContentWord`: a 接尾 node with no content word right
+    /// before it has nothing to attach to, so it is the head of its phrase. The
+    /// shipped dictionary converts `きはじゅくした` to `期 は 熟し た` with 期 as
+    /// 名詞,接尾 — the noun-suffix entry is cheaper than the plain noun — and
+    /// without this the pair 期 × 熟し could neither be picked nor fire.
+    /// 非自立 is left out of the exception: 動詞,非自立 normally follows `て`,
+    /// a particle, and turning `見 て いる` into the pair 見 × いる would be noise.
     public static func contentWordIndices(
         of segments: [Segment], dictionary: DictionarySource
     ) -> [Int] {
-        segments.indices.filter { isContentWord(posName: dictionary.posName(segments[$0].lid)) }
+        let posNames = segments.map { dictionary.posName($0.lid) }
+        return segments.indices.filter { index in
+            if isContentWord(posName: posNames[index]) { return true }
+            guard isHostlessCandidate(posName: posNames[index]) else { return false }
+            return index == 0 || !isContentWord(posName: posNames[index - 1])
+        }
+    }
+
+    /// 接尾 under any major class (名詞,接尾 / 動詞,接尾 / 形容詞,接尾).
+    static func isHostlessCandidate(posName: String) -> Bool {
+        let parts = posName.split(separator: ",", omittingEmptySubsequences: false)
+        return parts.count > 1 && parts[1] == "接尾"
     }
 
     /// The pairs a candidate offers: each content word with the next one.

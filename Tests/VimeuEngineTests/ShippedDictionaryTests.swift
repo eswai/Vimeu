@@ -158,4 +158,19 @@ final class ShippedDictionaryTests: XCTestCase {
             XCTAssertTrue(candidate.text.contains("\u{3000}"), candidate.text)
         }
     }
+
+    /// The shipped dictionary converts きはじゅくした with 期 as 名詞,接尾. A
+    /// suffix with no content word before it heads its own phrase, so it has to
+    /// be offered in the 共起 menus and count as one side of a pair.
+    func testHostlessSuffixCanTakePartInACollocation() throws {
+        let candidate = try XCTUnwrap(convert("きはじゅくした").first { $0.text == "期は熟した" })
+        let suffix = try XCTUnwrap(candidate.segments.first { $0.surface == "期" })
+        XCTAssertTrue(system.posName(suffix.lid).hasPrefix("名詞,接尾"),
+                      "the test is about the suffix entry")
+        XCTAssertEqual(editor.collocationChoices(for: [candidate]), ["期", "熟し"])
+        XCTAssertEqual(
+            Collocation.pairs(of: candidate.segments, dictionary: editor.dictionary),
+            [CollocationKey(left: "期", right: "熟し")]
+        )
+    }
 }

@@ -2,7 +2,7 @@
 # branch (commit your changes first: makepkg clones the repository).
 #   cd linux/packaging/arch && makepkg -si
 pkgname=fcitx5-vimeu-git
-pkgver=0.1.0.r43.bf67265
+pkgver=0.1.0.r45.94f59ad
 pkgrel=1
 pkgdesc='Japanese kana-kanji conversion for fcitx5 on Mozc'"'"'s dictionary and cost model'
 arch=('x86_64')

@@ -258,7 +258,8 @@ public struct AdjustmentView: View {
     /// Word pairs the user wants chosen together.
     ///
     /// Two menus rather than two text fields, and both are filled from the words
-    /// of the current candidates: a pair is only worth registering if it can
+    /// of the candidate selected in the list above (not every candidate — the
+    /// pooled list was too long to pick from): a pair is only worth registering if it can
     /// actually fire on a sentence, and typing invites pairs that never will —
     /// a typo, an inflected form the lattice never produces, a word from another
     /// sentence entirely. Picking from what is on screen makes an unusable pair
@@ -333,7 +334,7 @@ public struct AdjustmentView: View {
     private var collocationEditor: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if model.collocationChoices.isEmpty {
-                Text("変換すると、この文に出てくる自立語がここから選べます。")
+                Text("候補を選ぶと、その候補に含まれる自立語がここから選べます。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)

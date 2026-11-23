@@ -40,7 +40,13 @@ public final class AdjustmentViewModel: ObservableObject {
     /// Which candidate the 接続 pane is explaining. The word pane pools every
     /// candidate's entries, but a transition only means anything inside one
     /// path, so that pane needs a selection.
-    @Published public var selectedCandidate: Int = 0
+    ///
+    /// The 共起 menus follow it too: offering the content words of every
+    /// candidate made the menus too long to use, while the pair the user wants
+    /// is almost always made of words from the one candidate they are looking at.
+    @Published public var selectedCandidate: Int = 0 {
+        didSet { refreshCollocationChoices() }
+    }
 
     /// Nil until the dictionary has been opened; the window then shows why.
     public var editor: DictionaryEditor? {
@@ -129,15 +135,24 @@ public final class AdjustmentViewModel: ObservableObject {
         // conversion are the ones worth looking at.
         words = editor.wordKnobs(for: candidates, reading: reading)
 
-        collocationChoices = editor.collocationChoices(for: candidates)
+        refreshCollocationChoices()
+    }
+
+    /// Fill the 共起 menus from the selected candidate's content words.
+    private func refreshCollocationChoices() {
+        guard let editor, candidates.indices.contains(selectedCandidate) else {
+            collocationChoices = []
+            return
+        }
+        collocationChoices = editor.collocationChoices(for: [candidates[selectedCandidate]])
         // Keep a selection the user made, but never leave a menu showing a word
-        // that is not in this sentence — after a re-convert that would register
-        // a pair the user cannot see.
+        // that is not in the selected candidate — that would register a pair
+        // the user cannot see.
         if !collocationChoices.contains(collocationLeft) {
             collocationLeft = collocationChoices.first ?? ""
         }
         if !collocationChoices.contains(collocationRight) {
-            collocationRight = collocationChoices.dropFirst().first ?? ""
+            collocationRight = collocationChoices.first(where: { $0 != collocationLeft }) ?? ""
         }
     }
 

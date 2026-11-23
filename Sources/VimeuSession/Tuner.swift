@@ -74,6 +74,7 @@ public final class Tuner {
         if case .selectCandidate(let i) = command {
             guard candidates.indices.contains(i), i < Self.candidateRows else { throw CommandError.invalid("candidate \(i)") }
             selectedCandidate = i
+            refreshCollocationChoices()
             return
         }
         if case .reload = command {
@@ -195,8 +196,8 @@ public final class Tuner {
         // The 接続 pane explains one candidate; an edit is meant to move
         // candidates around, so follow the text, not the row.
         let wasSelected = candidates.indices.contains(selectedCandidate) ? candidates[selectedCandidate].text : nil
-        // Every candidate: the word and collocation panes pool their entries,
-        // and truncating would hide entries whose sentence ranked low.
+        // Every candidate: the word pane pools their entries, and truncating
+        // would hide entries whose sentence ranked low.
         candidates = Converter(dictionary: editor.dictionary).convert(reading: reading, limit: NBest.maxExpansions)
         if let wasSelected, let moved = candidates.firstIndex(where: { $0.text == wasSelected }) {
             selectedCandidate = moved
@@ -204,7 +205,19 @@ public final class Tuner {
             selectedCandidate = 0
         }
         words = editor.wordKnobs(for: candidates, reading: reading)
-        collocationChoices = editor.collocationChoices(for: candidates)
+        refreshCollocationChoices()
+    }
+
+    /// The 共起 menus offer the content words of the selected candidate only,
+    /// as on macOS (AdjustmentViewModel): pooling every candidate made the
+    /// menus too long to use, and the pair the user wants is almost always
+    /// made of words from the one candidate they are looking at.
+    private func refreshCollocationChoices() {
+        guard let editor = engine.editor, candidates.indices.contains(selectedCandidate) else {
+            collocationChoices = []
+            return
+        }
+        collocationChoices = editor.collocationChoices(for: [candidates[selectedCandidate]])
     }
 
     // MARK: - State
@@ -274,8 +287,8 @@ public final class Tuner {
         public let collocationBonus: Int32
     }
 
-    /// Rows of the candidate list sent to the window. The word and
-    /// collocation panes still pool every candidate; only the list a person
+    /// Rows of the candidate list sent to the window. The word pane still
+    /// pools every candidate; only the list a person
     /// scrolls is cut, which keeps an edit's round trip small (one reading
     /// can have 6,500 candidates, a megabyte of JSON).
     public static let candidateRows = 300

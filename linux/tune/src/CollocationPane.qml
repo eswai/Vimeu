@@ -4,14 +4,31 @@ import QtQuick.Controls.Material
 import QtQuick.Layouts
 
 // 共起: word pairs the user defines (DESIGN.md §3.5). The menus only offer
-// content words of the current candidates, so a pair that could never fire
-// cannot be registered.
+// content words of the candidate selected in the candidate list (not every
+// candidate — the pooled list was too long to pick from), so a pair that
+// could never fire cannot be registered.
 ColumnLayout {
     id: pane
     property var st
     readonly property var choices: st.collocationChoices || []
     readonly property var pairs: st.collocations || []
     spacing: 8
+
+    // A choice the user made survives a model change (another candidate
+    // selected, an edit re-converting) as long as the word is still there;
+    // otherwise the menu falls back, as AdjustmentViewModel does on macOS.
+    // Deferred so both menus have taken the new model first.
+    onChoicesChanged: Qt.callLater(syncMenus)
+    Component.onCompleted: syncMenus()
+    function syncMenus() {
+        const l = choices.indexOf(leftMenu.kept)
+        leftMenu.currentIndex = l >= 0 ? l : (choices.length > 0 ? 0 : -1)
+        leftMenu.kept = leftMenu.currentText
+        let r = choices.indexOf(rightMenu.kept)
+        if (r < 0) r = choices.findIndex(w => w !== leftMenu.currentText)
+        rightMenu.currentIndex = r
+        rightMenu.kept = rightMenu.currentText
+    }
 
     RowLayout {
         Layout.fillWidth: true
@@ -21,19 +38,33 @@ ColumnLayout {
             model: [qsTr("正の共起（同時に選びたい）"), qsTr("負の共起（同時に出したくない）")]
             Layout.preferredWidth: 260
         }
-        ComboBox { id: left; model: pane.choices; Layout.preferredWidth: 160 }
-        Label { text: polarity.currentIndex === 0 ? "→" : "↔"; font.pixelSize: 18 }
         ComboBox {
-            id: right
+            id: leftMenu
+            property string kept: ""
             model: pane.choices
+            visible: count > 0
             Layout.preferredWidth: 160
-            Component.onCompleted: if (count > 1) currentIndex = 1
-            onModelChanged: if (count > 1 && currentIndex === left.currentIndex) currentIndex = (left.currentIndex + 1) % count
+            onActivated: kept = currentText
+        }
+        Label { visible: leftMenu.visible; text: polarity.currentIndex === 0 ? "→" : "↔"; font.pixelSize: 18 }
+        ComboBox {
+            id: rightMenu
+            property string kept: ""
+            model: pane.choices
+            visible: count > 0
+            Layout.preferredWidth: 160
+            onActivated: kept = currentText
+        }
+        Label {
+            visible: pane.choices.length === 0
+            text: qsTr("候補を選ぶと、その候補に含まれる自立語がここから選べます。")
+            opacity: 0.6
         }
         Button {
+            visible: leftMenu.visible
             text: qsTr("組を追加")
-            enabled: left.currentText.length > 0 && right.currentText.length > 0 && left.currentText !== right.currentText
-            onClicked: backend.addCollocation(left.currentText, right.currentText, polarity.currentIndex === 1)
+            enabled: leftMenu.currentText.length > 0 && rightMenu.currentText.length > 0 && leftMenu.currentText !== rightMenu.currentText
+            onClicked: backend.addCollocation(leftMenu.currentText, rightMenu.currentText, polarity.currentIndex === 1)
         }
         Item { Layout.fillWidth: true }
     }

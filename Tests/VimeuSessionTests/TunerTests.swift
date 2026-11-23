@@ -53,7 +53,9 @@ struct TunerShippedDictionaryTests {
         #expect(s.words.contains { $0.surface == "皮" })
         #expect(s.connections.first?.left == "BOS")
         #expect(s.connections.last?.right == "EOS")
-        #expect(s.collocationChoices.contains("皮"))
+        // The 共起 menus offer the selected candidate's content words only.
+        #expect(!s.collocationChoices.isEmpty)
+        #expect(s.collocationChoices.allSatisfy { s.candidates[s.selectedCandidate].text.contains($0) })
         // Round-trips through JSON for the Qt side.
         let decoded = try JSONDecoder().decode(Tuner.State.self, from: Data(t.stateJSON.utf8))
         #expect(decoded == s)
@@ -95,6 +97,19 @@ struct TunerShippedDictionaryTests {
         #expect(t.state.candidates.first?.text == "皮を剥く")
         try t.run(.removeCollocation(left: "皮", right: "剥く"))
         #expect(t.state.collocations.isEmpty)
+    }
+
+    @Test func collocationChoicesFollowTheSelectedCandidate() throws {
+        let (t, dir) = freshTuner()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try t.run(.setReading("きはじゅくした"))
+        let index = try #require(t.state.candidates.firstIndex { $0.text == "期は熟した" })
+        try t.run(.selectCandidate(index))
+        // 期 is 名詞,接尾 here; with no content word before it, it heads its phrase.
+        #expect(t.state.collocationChoices == ["期", "熟し"])
+        let other = try #require(t.state.candidates.indices.first { t.state.candidates[$0].text != "期は熟した" })
+        try t.run(.selectCandidate(other))
+        #expect(t.state.collocationChoices != ["期", "熟し"])
     }
 
     @Test func reloadPicksUpExternalEdits() throws {

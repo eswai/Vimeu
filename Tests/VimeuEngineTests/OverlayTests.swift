@@ -236,4 +236,34 @@ final class OverlayTests: XCTestCase {
         )
         XCTAssertEqual(knobs.first { $0.surface == "箸" }?.baseCost, 7777)
     }
+
+    func testLoadFailureRecordsErrorAndPreventsOverwriting() throws {
+        let brokenDir = directory.appendingPathComponent("broken", isDirectory: true)
+        let badWordPath = brokenDir.appendingPathComponent("user_word.tsv")
+        try FileManager.default.createDirectory(at: badWordPath, withIntermediateDirectories: true)
+
+        let brokenEditor = DictionaryEditor(
+            system: system,
+            store: UserDictionaryStore(directory: brokenDir)
+        )
+        XCTAssertNotNil(brokenEditor.lastError)
+
+        brokenEditor.setWordCost(reading: "はし", surface: "端", cost: 500)
+        XCTAssertNil(brokenEditor.dictionary.wordEdit(reading: "はし", surface: "端"))
+        XCTAssertNotNil(brokenEditor.lastError)
+
+        var isDir: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: badWordPath.path, isDirectory: &isDir))
+        XCTAssertTrue(isDir.boolValue)
+    }
+
+    func testInvalidWordFieldsAreRejected() {
+        editor.setWordCost(reading: "はし\t", surface: "端", cost: 500)
+        XCTAssertNotNil(editor.lastError)
+        XCTAssertNil(editor.dictionary.wordEdit(reading: "はし\t", surface: "端"))
+
+        editor.setWordCost(reading: "はし", surface: "端\n", cost: 500)
+        XCTAssertNotNil(editor.lastError)
+        XCTAssertNil(editor.dictionary.wordEdit(reading: "はし", surface: "端\n"))
+    }
 }

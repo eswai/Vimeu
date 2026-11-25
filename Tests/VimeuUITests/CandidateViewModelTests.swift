@@ -23,6 +23,19 @@ final class CandidateViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testPanelSizeFollowsVisiblePageOnly() {
+        var candidates = (1...10).map { "候補\($0)" }
+        candidates.append(String(repeating: "あ", count: 40))
+        candidates.append("末尾")
+
+        let firstPage = CandidatePanel.panelSize(for: candidates, visibleIndices: 0..<10)
+        let secondPage = CandidatePanel.panelSize(for: candidates, visibleIndices: 10..<12)
+
+        XCTAssertLessThan(secondPage.height, firstPage.height)
+        XCTAssertLessThan(firstPage.width, secondPage.width)
+    }
+
+    @MainActor
     func testAdjustmentWordsUseCandidatesBeyondTheFormerNineItemLimit() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

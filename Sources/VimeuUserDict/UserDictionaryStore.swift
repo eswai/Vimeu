@@ -14,6 +14,17 @@ import Foundation
 /// one. At a few thousand rows the file is under 100 KB and the rewrite is not
 /// worth optimising into a diff.
 public final class UserDictionaryStore: @unchecked Sendable {
+    public enum StoreError: Error, LocalizedError, Equatable {
+        case invalidField(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .invalidField(let field):
+                return "タブや改行を含む文字列は保存できません: \(field)"
+            }
+        }
+    }
+
     public struct Snapshot: Sendable {
         public var words: [WordKey: WordEdit]
         public var collocations: [CollocationKey: CollocationEdit]
@@ -119,11 +130,19 @@ public final class UserDictionaryStore: @unchecked Sendable {
         return snapshot
     }
 
-    /// Tab-separated rows of a file, header skipped. A missing file is empty.
+    /// Tab-separated rows of a file, header skipped. A missing file is empty;
+    /// an existing file that cannot be read throws so callers do not overwrite
+    /// user data with an empty snapshot.
     private func rows(of url: URL) throws -> [[String]] {
-        guard let data = FileManager.default.contents(atPath: url.path) else { return [] }
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let data = try Data(contentsOf: url)
         let text = String(decoding: data, as: UTF8.self)
-        return text.split(separator: "\n", omittingEmptySubsequences: true)
+        // `\r\n` is a single Swift Character (grapheme cluster), so splitting on
+        // `"\n"` alone misses CRLF line endings altogether.
+        return text.split(
+            omittingEmptySubsequences: true,
+            whereSeparator: { $0 == "\n" || $0 == "\r\n" || $0 == "\r" }
+        )
             .dropFirst()
             .map { $0.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) }
     }
@@ -132,6 +151,12 @@ public final class UserDictionaryStore: @unchecked Sendable {
     /// with no cost of its own.
     private func parseOptionalCost(_ s: String) -> Int32? {
         s.isEmpty ? nil : Int32(s)
+    }
+
+    private func validateField(_ value: String) throws {
+        if value.contains("\t") || value.contains("\n") || value.contains("\r") {
+            throw StoreError.invalidField(value)
+        }
     }
 
     // MARK: - Save
@@ -144,6 +169,8 @@ public final class UserDictionaryStore: @unchecked Sendable {
         }
         var out = wordHeader + "\n"
         for e in sorted {
+            try validateField(e.reading)
+            try validateField(e.surface)
             let cost = e.cost.map(String.init) ?? ""
             out += "\(e.reading)\t\(e.surface)\t\(cost)\t\(e.disabled ? 1 : 0)\t\(e.updatedAt)\n"
         }
@@ -158,6 +185,8 @@ public final class UserDictionaryStore: @unchecked Sendable {
         }
         var out = collocationHeader + "\n"
         for e in sorted {
+            try validateField(e.left)
+            try validateField(e.right)
             out += "\(e.left)\t\(e.right)\t\(e.polarity.rawValue)\t\(e.updatedAt)\n"
         }
         try writeAtomically(out, to: collocationURL)
@@ -171,6 +200,8 @@ public final class UserDictionaryStore: @unchecked Sendable {
         }
         var out = connectionHeader + "\n"
         for e in sorted {
+            try validateField(e.left)
+            try validateField(e.right)
             let cost = e.cost.map(String.init) ?? ""
             out += "\(e.left)\t\(e.right)\t\(cost)\t\(e.disabled ? 1 : 0)\t\(e.updatedAt)\n"
         }

@@ -80,7 +80,7 @@ public final class CandidatePanel {
         // No caret to work from: sit under the pointer, which is at least on the
         // screen the user is looking at.
         let rect = cursorRect ?? NSRect(origin: NSEvent.mouseLocation, size: .zero)
-        let visFrame = screen(containing: rect).visibleFrame
+        guard let visFrame = screen(containing: rect)?.visibleFrame else { return }
         let below = rect.minY - panel.frame.height - 2
         // Flip above the caret when there is no room below it.
         let y = below < visFrame.minY ? rect.maxY + 2 : below
@@ -88,20 +88,33 @@ public final class CandidatePanel {
     }
 
     private func fitToContent() {
-        let visibleCount = min(viewModel.candidates.count, CandidateViewModel.pageSize)
-        let height = CGFloat(visibleCount) * Self.rowHeight + Self.padding * 2
         var frame = panel.frame
-        frame.size = CGSize(width: contentWidth(), height: height)
+        frame.size = Self.panelSize(
+            for: viewModel.candidates,
+            visibleIndices: viewModel.visibleIndices
+        )
         panel.setFrame(frame, display: true)
         reposition()
     }
 
-    /// Width of the widest candidate, clamped. Measured with the same font the
-    /// row uses, so the text is not truncated unless it exceeds `maxWidth`.
-    private func contentWidth() -> CGFloat {
+    /// Size of the panel for the currently visible page only. Measuring all
+    /// candidates (up to `NBest.maxExpansions`) on every selection step would
+    /// block the main thread on dense readings.
+    static func panelSize(for candidates: [String], visibleIndices: Range<Int>) -> CGSize {
+        let height = CGFloat(visibleIndices.count) * Self.rowHeight + Self.padding * 2
+        return CGSize(width: contentWidth(for: candidates, visibleIndices: visibleIndices), height: height)
+    }
+
+    /// Width of the widest visible candidate, clamped. Measured with the same
+    /// font the row uses, so the text is not truncated unless it exceeds `maxWidth`.
+    private static func contentWidth(for candidates: [String], visibleIndices: Range<Int>) -> CGFloat {
         let font = NSFont.systemFont(ofSize: CandidateView.textSize)
-        let widest = viewModel.candidates.reduce(CGFloat.zero) { widest, text in
-            max(widest, (text as NSString).size(withAttributes: [.font: font]).width)
+        let maxTextWidth = Self.maxWidth - Self.rowChrome
+        var widest: CGFloat = 0
+        for index in visibleIndices {
+            let width = (candidates[index] as NSString).size(withAttributes: [.font: font]).width
+            if width > widest { widest = width }
+            if widest >= maxTextWidth { break }
         }
         return min(max(widest.rounded(.up) + Self.rowChrome, Self.minWidth), Self.maxWidth)
     }
@@ -113,11 +126,11 @@ public final class CandidatePanel {
     /// against *any* screen. Using it silently fell through to `NSScreen.main` —
     /// the screen with the key window — so on a multi-display setup the panel
     /// was clamped to the wrong screen's visible frame and jumped displays.
-    private func screen(containing rect: NSRect) -> NSScreen {
+    private func screen(containing rect: NSRect) -> NSScreen? {
         NSScreen.screens.first { $0.frame.contains(rect.origin) }
             ?? NSScreen.screens.first { $0.frame.intersects(rect) }
             ?? NSScreen.main
-            ?? NSScreen.screens[0]
+            ?? NSScreen.screens.first
     }
 
     private func clampToScreen(_ origin: NSPoint, in visFrame: NSRect) -> NSPoint {

@@ -206,4 +206,46 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertTrue(UserDict.utf8Less("あ", "あい"))
         XCTAssertFalse(UserDict.utf8Less("あ", "あ"))
     }
+
+    func testCRLFRowsLoadCleanly() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let crlf = "reading\tsurface\tcost\tdisabled\tupdated_at\r\nはし\t橋\t1500\t0\t12345\r\n"
+        try crlf.write(
+            to: directory.appendingPathComponent("user_word.tsv"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let loaded = try store.load().words
+        let edit = loaded[WordKey(reading: "はし", surface: "橋")]
+        XCTAssertEqual(edit?.cost, 1500)
+        XCTAssertEqual(edit?.disabled, false)
+        XCTAssertEqual(edit?.updatedAt, 12345)
+    }
+
+    func testRejectsTabsAndNewlinesInFields() {
+        let badWord = WordEdit(reading: "はし\t", surface: "橋", cost: 1000, disabled: false)
+        XCTAssertThrowsError(try store.saveWords([badWord.key: badWord])) { error in
+            XCTAssertEqual(error as? UserDictionaryStore.StoreError, .invalidField("はし\t"))
+        }
+
+        let badCollocation = CollocationEdit(left: "皮", right: "剥\nく")
+        XCTAssertThrowsError(try store.saveCollocations([badCollocation.key: badCollocation])) { error in
+            XCTAssertEqual(error as? UserDictionaryStore.StoreError, .invalidField("剥\nく"))
+        }
+
+        let badConnection = ConnectionEdit(left: "BOS\r", right: "名詞", cost: 1000, disabled: false)
+        XCTAssertThrowsError(try store.saveConnections([badConnection.key: badConnection])) { error in
+            XCTAssertEqual(error as? UserDictionaryStore.StoreError, .invalidField("BOS\r"))
+        }
+    }
+
+    func testUnreadableExistingFileThrowsOnLoad() throws {
+        // A directory at the TSV path forces `Data(contentsOf:)` to fail even
+        // under environments where chmod permissions might be bypassed.
+        let badPath = directory.appendingPathComponent("user_word.tsv")
+        try FileManager.default.createDirectory(at: badPath, withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(try store.load())
+    }
 }

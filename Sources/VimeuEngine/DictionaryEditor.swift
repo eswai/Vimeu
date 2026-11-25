@@ -67,17 +67,31 @@ public final class DictionaryEditor: @unchecked Sendable {
 
     private var snapshot: UserDictionaryStore.Snapshot
     private var overlay: OverlaidDictionary
+    private var loadFailed = false
+    private var lastErrorStorage: String?
 
-    /// Raised when persisting fails, so the UI can say so rather than silently
-    /// losing the user's work.
-    public private(set) var lastError: String?
+    /// Raised when loading or persisting fails, so the UI can say so rather
+    /// than silently losing the user's work.
+    public var lastError: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return lastErrorStorage
+    }
 
     public init(system: DicReader, store: UserDictionaryStore) {
         self.system = system
         self.store = store
-        let loaded = (try? store.load()) ?? UserDictionaryStore.Snapshot()
-        self.snapshot = loaded
-        self.overlay = OverlaidDictionary(system: system, edits: loaded)
+        do {
+            let loaded = try store.load()
+            self.snapshot = loaded
+            self.overlay = OverlaidDictionary(system: system, edits: loaded)
+        } catch {
+            let empty = UserDictionaryStore.Snapshot()
+            self.snapshot = empty
+            self.overlay = OverlaidDictionary(system: system, edits: empty)
+            self.loadFailed = true
+            self.lastErrorStorage = "ユーザー辞書の読み込みに失敗しました（保護のため保存を停止しています）: \(error)"
+        }
     }
 
     /// The effective dictionary. Replaced wholesale after each edit, so a
@@ -91,8 +105,12 @@ public final class DictionaryEditor: @unchecked Sendable {
     // MARK: - Word edits
 
     public func setWordCost(reading: String, surface: String, cost: Int32) {
+        guard Self.isValidField(reading), Self.isValidField(surface) else {
+            setError("タブや改行、または空の読み・表記は保存できません")
+            return
+        }
         let key = WordKey(reading: reading, surface: surface)
-        mutateWords { words in
+        mutateWords { words, _ in
             words[key] = WordEdit(
                 reading: reading, surface: surface,
                 cost: cost, disabled: words[key]?.disabled ?? false
@@ -108,11 +126,20 @@ public final class DictionaryEditor: @unchecked Sendable {
     /// 強める and the number goes down, which is the whole reason this method
     /// exists rather than exposing the raw value.
     public func boostWord(reading: String, surface: String, steps: Int) {
-        let current = effectiveWordCost(reading: reading, surface: surface) ?? 0
-        setWordCost(
-            reading: reading, surface: surface,
-            cost: UserDict.clampCost(current - Int32(steps) * UserDict.costStep)
-        )
+        guard Self.isValidField(reading), Self.isValidField(surface) else {
+            setError("タブや改行、または空の読み・表記は保存できません")
+            return
+        }
+        let key = WordKey(reading: reading, surface: surface)
+        mutateWords { words, overlay in
+            let current = overlay.effectiveCost(reading: reading, surface: surface)
+                ?? words[key]?.cost ?? 0
+            let next = UserDict.clampCost(current - Int32(steps) * UserDict.costStep)
+            words[key] = WordEdit(
+                reading: reading, surface: surface,
+                cost: next, disabled: words[key]?.disabled ?? false
+            )
+        }
     }
 
     /// Hide a word from conversion.
@@ -123,7 +150,7 @@ public final class DictionaryEditor: @unchecked Sendable {
     public func deleteWord(reading: String, surface: String) {
         let key = WordKey(reading: reading, surface: surface)
         let inSystem = !system.tokens(reading: reading, surface: surface).isEmpty
-        mutateWords { words in
+        mutateWords { words, _ in
             guard inSystem else {
                 words[key] = nil
                 return
@@ -143,7 +170,7 @@ public final class DictionaryEditor: @unchecked Sendable {
     /// the row has nothing left to say and is dropped.
     public func reviveWord(reading: String, surface: String) {
         let key = WordKey(reading: reading, surface: surface)
-        mutateWords { words in
+        mutateWords { words, _ in
             guard let existing = words[key] else { return }
             guard let cost = existing.cost else {
                 words[key] = nil
@@ -156,7 +183,9 @@ public final class DictionaryEditor: @unchecked Sendable {
     /// Drop the edit entirely. A system word returns to its `vimeu.dic` value
     /// (and is un-hidden); a user-added word disappears.
     public func resetWord(reading: String, surface: String) {
-        mutateWords { $0[WordKey(reading: reading, surface: surface)] = nil }
+        mutateWords { words, _ in
+            words[WordKey(reading: reading, surface: surface)] = nil
+        }
     }
 
     // MARK: - Collocation edits
@@ -172,7 +201,7 @@ public final class DictionaryEditor: @unchecked Sendable {
     ) {
         let left = left.trimmingCharacters(in: .whitespaces)
         let right = right.trimmingCharacters(in: .whitespaces)
-        guard !left.isEmpty, !right.isEmpty else { return }
+        guard Self.isValidField(left), Self.isValidField(right) else { return }
         mutateCollocations { pairs in
             // A negative relation is mutual exclusion, so store it in a stable
             // order and prevent the same two words from being both positive and
@@ -257,8 +286,8 @@ public final class DictionaryEditor: @unchecked Sendable {
     /// lattice nodes of the candidate being explained — and stores names, because
     /// that is what survives a dictionary rebuild (see `ConnectionKey`).
     public func setConnectionCost(rid: Int, lid: Int, cost: Int32) {
-        let key = dictionary.connectionKey(rid, lid)
-        mutateConnections { connections in
+        mutateConnections { connections, overlay in
+            let key = overlay.connectionKey(rid, lid)
             connections[key] = ConnectionEdit(
                 left: key.left, right: key.right,
                 cost: cost, disabled: false
@@ -272,11 +301,15 @@ public final class DictionaryEditor: @unchecked Sendable {
     /// Resolved against the value in force now and stored absolute, so the edit
     /// does not drift when `vimeu.dic` is rebuilt.
     public func boostConnection(rid: Int, lid: Int, steps: Int) {
-        let current = dictionary.transitionCost(rid, lid)
-        setConnectionCost(
-            rid: rid, lid: lid,
-            cost: UserDict.clampCost(current - Int32(steps) * UserDict.costStep)
-        )
+        mutateConnections { connections, overlay in
+            let current = overlay.transitionCost(rid, lid)
+            let next = UserDict.clampCost(current - Int32(steps) * UserDict.costStep)
+            let key = overlay.connectionKey(rid, lid)
+            connections[key] = ConnectionEdit(
+                left: key.left, right: key.right,
+                cost: next, disabled: false
+            )
+        }
     }
 
     /// "この接続を使わない" — the transition keeps a finite cost
@@ -286,8 +319,8 @@ public final class DictionaryEditor: @unchecked Sendable {
     /// Any cost the user had set is kept, so 復活 lands back on it rather than on
     /// Mozc's value.
     public func disableConnection(rid: Int, lid: Int) {
-        let key = dictionary.connectionKey(rid, lid)
-        mutateConnections { connections in
+        mutateConnections { connections, overlay in
+            let key = overlay.connectionKey(rid, lid)
             connections[key] = ConnectionEdit(
                 left: key.left, right: key.right,
                 cost: connections[key]?.cost, disabled: true
@@ -296,8 +329,8 @@ public final class DictionaryEditor: @unchecked Sendable {
     }
 
     public func reviveConnection(rid: Int, lid: Int) {
-        let key = dictionary.connectionKey(rid, lid)
-        mutateConnections { connections in
+        mutateConnections { connections, overlay in
+            let key = overlay.connectionKey(rid, lid)
             guard let existing = connections[key] else { return }
             guard let cost = existing.cost else {
                 connections[key] = nil
@@ -311,8 +344,9 @@ public final class DictionaryEditor: @unchecked Sendable {
 
     /// Back to Mozc's own value for this cell.
     public func resetConnection(rid: Int, lid: Int) {
-        let key = dictionary.connectionKey(rid, lid)
-        mutateConnections { $0[key] = nil }
+        mutateConnections { connections, overlay in
+            connections[overlay.connectionKey(rid, lid)] = nil
+        }
     }
 
     public var connectionEdits: [ConnectionEdit] { dictionary.allConnectionEdits }
@@ -342,11 +376,6 @@ public final class DictionaryEditor: @unchecked Sendable {
                 disabled: edit?.disabled ?? false
             )
         }
-    }
-
-    private func effectiveWordCost(reading: String, surface: String) -> Int32? {
-        dictionary.effectiveCost(reading: reading, surface: surface)
-            ?? dictionary.wordEdit(reading: reading, surface: surface)?.cost
     }
 
     // MARK: - Knobs
@@ -396,39 +425,49 @@ public final class DictionaryEditor: @unchecked Sendable {
 
     // MARK: - Plumbing
 
-    private func mutateWords(_ body: (inout [WordKey: WordEdit]) -> Void) {
+    private static func isValidField(_ value: String) -> Bool {
+        !value.isEmpty && !value.contains("\t") && !value.contains("\n") && !value.contains("\r")
+    }
+
+    private func setError(_ message: String) {
         lock.lock()
-        body(&snapshot.words)
-        let words = snapshot.words
+        defer { lock.unlock() }
+        lastErrorStorage = message
+    }
+
+    private func mutateWords(_ body: (inout [WordKey: WordEdit], OverlaidDictionary) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !loadFailed else { return }
+        body(&snapshot.words, overlay)
         overlay = OverlaidDictionary(system: system, edits: snapshot)
-        lock.unlock()
-        record { try store.saveWords(words) }
+        recordLocked { try store.saveWords(snapshot.words) }
     }
 
     private func mutateCollocations(_ body: (inout [CollocationKey: CollocationEdit]) -> Void) {
         lock.lock()
+        defer { lock.unlock() }
+        guard !loadFailed else { return }
         body(&snapshot.collocations)
-        let pairs = snapshot.collocations
         overlay = OverlaidDictionary(system: system, edits: snapshot)
-        lock.unlock()
-        record { try store.saveCollocations(pairs) }
+        recordLocked { try store.saveCollocations(snapshot.collocations) }
     }
 
-    private func mutateConnections(_ body: (inout [ConnectionKey: ConnectionEdit]) -> Void) {
+    private func mutateConnections(_ body: (inout [ConnectionKey: ConnectionEdit], OverlaidDictionary) -> Void) {
         lock.lock()
-        body(&snapshot.connections)
-        let connections = snapshot.connections
+        defer { lock.unlock() }
+        guard !loadFailed else { return }
+        body(&snapshot.connections, overlay)
         overlay = OverlaidDictionary(system: system, edits: snapshot)
-        lock.unlock()
-        record { try store.saveConnections(connections) }
+        recordLocked { try store.saveConnections(snapshot.connections) }
     }
 
-    private func record(_ work: () throws -> Void) {
+    private func recordLocked(_ work: () throws -> Void) {
         do {
             try work()
-            lastError = nil
+            lastErrorStorage = nil
         } catch {
-            lastError = "\(error)"
+            lastErrorStorage = "\(error)"
         }
     }
 }

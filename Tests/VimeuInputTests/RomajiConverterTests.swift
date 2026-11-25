@@ -73,6 +73,7 @@ final class RomajiConverterTests: XCTestCase {
         XCTAssertEqual(typeAndFlush("xa"), "ぁ")
         XCTAssertEqual(typeAndFlush("la"), "ぁ")
         XCTAssertEqual(typeAndFlush("ltsu"), "っ")
+        XCTAssertEqual(typeAndFlush("lwa"), "ゎ")
     }
 }
 
@@ -90,6 +91,13 @@ final class InputBufferTests: XCTestCase {
         XCTAssertEqual(buffer.displayString, "012345678")
         XCTAssertFalse(InputBuffer.isComposingCharacter(" "))
         XCTAssertFalse(InputBuffer.isComposingCharacter("!"))
+        XCTAssertTrue(InputBuffer.isComposingCharacter("a"))
+        XCTAssertTrue(InputBuffer.isComposingCharacter("Z"))
+        // Option+letter produces non-ASCII letters (e.g. å, é); they must not
+        // start a romaji composition.
+        XCTAssertFalse(InputBuffer.isComposingCharacter("å"))
+        XCTAssertFalse(InputBuffer.isComposingCharacter("é"))
+        XCTAssertFalse(InputBuffer.isComposingCharacter("あ"))
     }
 
     func testDigitsKeepKanaInTheSameComposition() {

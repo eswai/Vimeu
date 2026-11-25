@@ -100,7 +100,7 @@ public final class OverlaidDictionary: DictionarySource, @unchecked Sendable {
             .map(\.key))
         self.negativeCollocations = Set(edits.collocations.values
             .filter { $0.polarity == .negative }
-            .map(\.key))
+            .map { CollocationKey.unordered($0.left, $0.right) })
         self.collocationEdits = edits.collocations
         self.connectionEdits = edits.connections
         self.editedSurfaces = Set(edits.words.keys.map(\.surface))

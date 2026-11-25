@@ -266,4 +266,42 @@ final class OverlayTests: XCTestCase {
         XCTAssertNotNil(editor.lastError)
         XCTAssertNil(editor.dictionary.wordEdit(reading: "はし", surface: "端\n"))
     }
+
+    func testUnknownPassthroughKnobUsesUnknownCost() {
+        let candidates = convert("ん")
+        let knob = editor.wordKnobs(for: candidates, reading: "ん").first { $0.surface == "ん" }
+        XCTAssertEqual(knob?.cost, Lattice.unknownCost)
+        XCTAssertNil(knob?.baseCost ?? nil)
+
+        editor.boostWord(reading: "ん", surface: "ん", steps: 1)
+        XCTAssertEqual(
+            editor.dictionary.wordEdit(reading: "ん", surface: "ん")?.cost,
+            Lattice.unknownCost - UserDict.costStep
+        )
+    }
+
+    func testCanIndexReadingChecksAlphabetAndLength() {
+        XCTAssertTrue(editor.canIndexReading("はし"))
+        XCTAssertFalse(editor.canIndexReading(""))
+        XCTAssertFalse(editor.canIndexReading("はし1"))
+        XCTAssertFalse(editor.canIndexReading("ハシ"))
+        XCTAssertFalse(editor.canIndexReading(String(repeating: "は", count: DicFormat.maxReadingLength + 1)))
+    }
+
+    func testZeroLimitReturnsEmpty() {
+        XCTAssertEqual(convert("はし", limit: 0), [])
+    }
+
+    func testPositiveAndNegativeCollocationsCombineWithWindowFromFirstAllowedPath() {
+        // 橋渡る (best) is forbidden; 箸渡る is the first allowed path, and a
+        // third candidate within `collocationWindow` of 箸渡る can be promoted
+        // by a positive collocation.
+        editor.setWordCost(reading: "はし", surface: "端", cost: 5000)
+        editor.addNegativeCollocation(left: "橋", right: "渡る")
+        editor.addPositiveCollocation(left: "端", right: "渡る")
+
+        let results = convert("はしわたる", limit: 3)
+        XCTAssertFalse(results.contains { $0.text == "橋渡る" })
+        XCTAssertEqual(results.first?.text, "端渡る")
+    }
 }

@@ -58,9 +58,14 @@ public struct AdjustmentView: View {
         // that separation is what gives a macOS window its depth.
         .background(Color(nsColor: .controlBackgroundColor))
         .sheet(isPresented: $showAddWord) {
-            AddWordSheet { reading, surface, cost in
-                model.addWord(reading: reading, surface: surface, cost: cost)
-            }
+            AddWordSheet(
+                validate: { reading, surface, costText in
+                    model.validateNewWord(reading: reading, surface: surface, costText: costText)
+                },
+                onAdd: { reading, surface, cost in
+                    model.addWord(reading: reading, surface: surface, cost: cost)
+                }
+            )
         }
     }
 
@@ -1099,6 +1104,7 @@ private struct KnobActions: View {
 // MARK: - Sheets
 
 private struct AddWordSheet: View {
+    let validate: (String, String, String) -> String?
     let onAdd: (String, String, Int32) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -1108,6 +1114,10 @@ private struct AddWordSheet: View {
     /// bothered to add actually wins the first time they try it.
     @State private var cost = "1000"
 
+    private var validationError: String? {
+        validate(reading, surface, cost)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("単語を追加").font(.headline)
@@ -1115,6 +1125,11 @@ private struct AddWordSheet: View {
                 TextField("読み", text: $reading, prompt: Text("ひらがな"))
                 TextField("表記", text: $surface)
                 TextField("コスト", text: $cost)
+                if let error = validationError, !reading.isEmpty || !surface.isEmpty || cost != "1000" {
+                    Text(error)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                }
                 Text("コストは小さいほど優先されます。辞書の語はおおむね 3000〜8000 です。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -1124,11 +1139,13 @@ private struct AddWordSheet: View {
                 Spacer()
                 Button("キャンセル") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("追加") {
-                    onAdd(reading, surface, Int32(cost) ?? 1000)
+                    guard validationError == nil,
+                          let parsed = Int32(cost.trimmingCharacters(in: .whitespaces)) else { return }
+                    onAdd(reading, surface, parsed)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(reading.isEmpty || surface.isEmpty)
+                .disabled(validationError != nil)
             }
         }
         .padding(20)
@@ -1261,7 +1278,7 @@ private struct InputSettingsView: View {
             }
             Section("再変換") {
                 Toggle("確定直後の Backspace で再変換する", isOn: $reconvertOnBackspace)
-                Text("確定した文字列を未確定に戻して候補を出します。オフにすると通常どおり 1 文字削除します。カーソル直前の文字列を確認できないアプリ（Firefox、Ghostty など）では、オンでも 1 文字削除になります。")
+                Text("確定した文字列を未確定に戻して候補を出します。オフにすると通常どおり 1 文字削除します。カーソル直前の文字列を確認できないアプリ（Ghostty、Google Docs など）では、オンでも 1 文字削除になります。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

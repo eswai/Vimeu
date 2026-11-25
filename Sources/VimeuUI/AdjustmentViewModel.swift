@@ -185,6 +185,24 @@ public final class AdjustmentViewModel: ObservableObject {
         reconvert()
     }
 
+    public func validateNewWord(reading: String, surface: String, costText: String) -> String? {
+        if reading.isEmpty || surface.isEmpty {
+            return "読みと表記を入力してください。"
+        }
+        if reading.contains("\t") || reading.contains("\n") || reading.contains("\r")
+            || surface.contains("\t") || surface.contains("\n") || surface.contains("\r") {
+            return "タブや改行は含められません。"
+        }
+        if let editor, !editor.canIndexReading(reading) {
+            return "読みには 1〜16 文字のひらがな（辞書に含まれるかな）を入力してください。"
+        }
+        guard let parsed = Int32(costText.trimmingCharacters(in: .whitespaces)),
+              UserDict.costRange.contains(parsed) else {
+            return "コストは \(UserDict.costRange.lowerBound)〜\(UserDict.costRange.upperBound) の整数を入力してください。"
+        }
+        return nil
+    }
+
     public func addWord(reading: String, surface: String, cost: Int32) {
         guard !reading.isEmpty, !surface.isEmpty else { return }
         editor?.setWordCost(reading: reading, surface: surface, cost: cost)

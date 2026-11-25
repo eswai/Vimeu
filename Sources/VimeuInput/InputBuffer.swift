@@ -27,7 +27,7 @@ public struct InputBuffer {
     }
 
     public static func isComposingCharacter(_ ch: Character) -> Bool {
-        ch.isLetter || isASCIIDigit(ch)
+        (ch.isASCII && ch.isLetter) || isASCIIDigit(ch)
     }
 
     /// U+3000, inserted by Option+Space while composing.

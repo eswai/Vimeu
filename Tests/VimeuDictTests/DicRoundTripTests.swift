@@ -234,6 +234,21 @@ final class DicRoundTripTests: XCTestCase {
         XCTAssertThrowsError(try DicReader(path: path))
     }
 
+    func testRejectsHeaderCountsExceedingSectionLengths() throws {
+        _ = try writeSample()
+        var data = try Data(contentsOf: URL(fileURLWithPath: path))
+
+        // Inflate posCount (header offset 24) beyond what the connection and
+        // posNames sections hold; init must throw instead of reading out of bounds.
+        var bogusPOSCount = UInt32(999).littleEndian
+        withUnsafeBytes(of: &bogusPOSCount) { bytes in
+            data.replaceSubrange(24..<28, with: bytes)
+        }
+        try data.write(to: URL(fileURLWithPath: path))
+
+        XCTAssertThrowsError(try DicReader(path: path))
+    }
+
     func testRejectsMismatchedConnectionMatrix() throws {
         let w = DicWriter()
         XCTAssertThrowsError(

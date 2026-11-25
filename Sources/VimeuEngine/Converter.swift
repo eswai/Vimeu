@@ -160,6 +160,7 @@ public final class Converter: Sendable {
     /// `previousRightID` is ephemeral context from the same loaded dictionary's
     /// POS table. A continuation uses that transition and no new prefix penalty.
     public func convert(reading: String, limit: Int = 9, previousRightID: Int? = nil) -> [Candidate] {
+        guard limit > 0 else { return [] }
         let scalars = Array(reading.unicodeScalars)
         guard !scalars.isEmpty else { return [] }
 
@@ -174,24 +175,24 @@ public final class Converter: Sendable {
         let searchExtension: NBest.Extension?
         if !negativePairs.isEmpty {
             // A forbidden path may be the Viterbi winner, so its cost cannot be
-            // used as the ceiling for the search. Keep enumerating until enough
-            // allowed paths have been found; the normal NBest expansion cap is
-            // still the safety valve for a dense lattice.
+            // used as the ceiling up front. When positive pairs are also active,
+            // `window` bounds the extra search relative to the first allowed path.
             let nodes = lattice.nodes
+            let filter = Collocation.NegativePairFilter(table: negativePairs)
             let acceptsPath: @Sendable ([Int]) -> Bool = { path in
-                !Collocation.containsNegativePair(
-                    in: path.map { nodes[$0].surface }, table: negativePairs
-                )
+                !filter.matches(surfaces: path.map { nodes[$0].surface })
             }
             searchExtension = NBest.Extension(
-                limit: max(limit, pairs.isEmpty ? 1 : Self.rerankDepth),
+                limit: pairs.isEmpty ? limit : max(limit, Self.rerankDepth),
                 ceiling: Int32.max,
+                window: pairs.isEmpty ? nil : UserDict.collocationWindow,
                 acceptsPath: acceptsPath
             )
         } else if !pairs.isEmpty {
+            let (ceiling, overflow) = viterbi.totalCost.addingReportingOverflow(UserDict.collocationWindow)
             searchExtension = NBest.Extension(
                 limit: max(limit, Self.rerankDepth),
-                ceiling: viterbi.totalCost + UserDict.collocationWindow
+                ceiling: overflow ? Int32.max : ceiling
             )
         } else {
             searchExtension = nil

@@ -63,25 +63,52 @@ public final class DicReader: @unchecked Sendable {
         let storedHash = bytes.u64(40)
 
         let map = bytes
-        func section(_ s: DicFormat.Section) throws -> Int {
+        func section(_ s: DicFormat.Section) throws -> (offset: Int, length: Int) {
             let base = DicFormat.sectionTableOffset + s.rawValue * 16
-            let offset = Int(map.u64(base))
-            let length = Int(map.u64(base + 8))
-            guard offset >= 0, length >= 0, offset + length <= map.count else {
+            let rawOffset = map.u64(base)
+            let rawLength = map.u64(base + 8)
+            guard let offset = Int(exactly: rawOffset),
+                  let length = Int(exactly: rawLength),
+                  offset >= 0, length >= 0,
+                  offset <= map.count, length <= map.count - offset else {
                 throw DicError.truncated(s)
             }
-            return offset
+            return (offset, length)
         }
 
-        alphabetOff = try section(.alphabet)
-        keyOffsetsOff = try section(.keyOffsets)
-        keyBytesOff = try section(.keyBytes)
-        tokenOffsetsOff = try section(.tokenOffsets)
-        tokensOff = try section(.tokens)
-        surfacePoolOff = try section(.surfacePool)
-        connectionOff = try section(.connection)
-        boundaryOff = try section(.boundary)
-        posNamesOff = try section(.posNames)
+        let alphabetSec = try section(.alphabet)
+        let keyOffsetsSec = try section(.keyOffsets)
+        let keyBytesSec = try section(.keyBytes)
+        let tokenOffsetsSec = try section(.tokenOffsets)
+        let tokensSec = try section(.tokens)
+        let surfacePoolSec = try section(.surfacePool)
+        let connectionSec = try section(.connection)
+        let boundarySec = try section(.boundary)
+        let posNamesSec = try section(.posNames)
+
+        guard alphabetCount <= 255 else { throw DicError.alphabetOverflow(alphabetCount) }
+        guard alphabetSec.length >= alphabetCount * 4 else { throw DicError.truncated(.alphabet) }
+        guard keyOffsetsSec.length >= (readingCount + 1) * 4 else { throw DicError.truncated(.keyOffsets) }
+        guard tokenOffsetsSec.length >= (readingCount + 1) * 4 else { throw DicError.truncated(.tokenOffsets) }
+        let (tokensBytes, tokensOverflow) = tokenCount.multipliedReportingOverflow(by: DicFormat.tokenSize)
+        guard !tokensOverflow, tokensSec.length >= tokensBytes else { throw DicError.truncated(.tokens) }
+        let (posSquared, posSqOverflow) = posCount.multipliedReportingOverflow(by: posCount)
+        let (connBytes, connOverflow) = posSquared.multipliedReportingOverflow(by: 2)
+        guard !posSqOverflow, !connOverflow, connectionSec.length >= connBytes else {
+            throw DicError.truncated(.connection)
+        }
+        let (boundaryBytes, boundaryOverflow) = posCount.multipliedReportingOverflow(by: 4)
+        guard !boundaryOverflow, boundarySec.length >= boundaryBytes else { throw DicError.truncated(.boundary) }
+
+        alphabetOff = alphabetSec.offset
+        keyOffsetsOff = keyOffsetsSec.offset
+        keyBytesOff = keyBytesSec.offset
+        tokenOffsetsOff = tokenOffsetsSec.offset
+        tokensOff = tokensSec.offset
+        surfacePoolOff = surfacePoolSec.offset
+        connectionOff = connectionSec.offset
+        boundaryOff = boundarySec.offset
+        posNamesOff = posNamesSec.offset
 
         var codes = [UInt32: UInt8](minimumCapacity: alphabetCount)
         for i in 0..<alphabetCount {
@@ -92,8 +119,11 @@ public final class DicReader: @unchecked Sendable {
         var offsets = [Int](repeating: 0, count: posCount)
         var at = 0
         for i in 0..<posCount {
+            guard at + 2 <= posNamesSec.length else { throw DicError.truncated(.posNames) }
             offsets[i] = at
-            at += 2 + Int(map.u16(posNamesOff + at))
+            let nameLen = Int(map.u16(posNamesOff + at))
+            guard at + 2 + nameLen <= posNamesSec.length else { throw DicError.truncated(.posNames) }
+            at += 2 + nameLen
         }
         posNameOffsets = offsets
 
@@ -233,8 +263,9 @@ public final class DicReader: @unchecked Sendable {
         var scalars = String.UnicodeScalarView()
         for i in 0..<length {
             let code = Int(bytes[keyBytesOff + start + i])
+            guard code > 0, code <= alphabetCount else { continue }
             let value = bytes.u32(alphabetOff + (code - 1) * 4)
-            scalars.append(Unicode.Scalar(value)!)
+            if let scalar = Unicode.Scalar(value) { scalars.append(scalar) }
         }
         return String(scalars)
     }

@@ -527,11 +527,18 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         return candidates
     }
 
-    private func enterConverting(reading: String, candidates: [String], selected: Int, previousRightID: Int?, client: Any?) {
+    private func enterConverting(
+        reading: String,
+        candidates: [String],
+        selected: Int,
+        previousRightID: Int?,
+        replacementRange: NSRange = NSRange(location: NSNotFound, length: 0),
+        client: Any?
+    ) {
         converting = ConvertingState(reading: reading, candidates: candidates, selected: selected, previousRightID: previousRightID)
         // Set the marked text first: the caret rectangle we anchor to is only
         // meaningful once the client has the composing text.
-        updateMarkedText(with: candidates[selected], client: client)
+        setMarked(candidates[selected], replacementRange: replacementRange, client: client)
         panelShow(candidates, selected: selected, anchor: caretRect(client: client))
     }
 
@@ -719,7 +726,11 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         setMarked(text, client: client)
     }
 
-    private func setMarked(_ text: String, client: Any?) {
+    private func setMarked(
+        _ text: String,
+        replacementRange: NSRange = NSRange(location: NSNotFound, length: 0),
+        client: Any?
+    ) {
         guard let c = client as? IMKTextInput else { return }
         let attrs: [NSAttributedString.Key: Any] = [
             .underlineStyle: NSUnderlineStyle.single.rawValue,
@@ -727,7 +738,7 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         c.setMarkedText(
             NSAttributedString(string: text, attributes: attrs),
             selectionRange: NSRange(location: text.utf16.count, length: 0),
-            replacementRange: NSRange(location: NSNotFound, length: 0)
+            replacementRange: replacementRange
         )
     }
 
@@ -806,14 +817,8 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
         logger.info("commitUndo restore=\(String(describing: method), privacy: .public)")
         switch method {
         case .replaceRange:
-            let attrs: [NSAttributedString.Key: Any] = [.underlineStyle: NSUnderlineStyle.single.rawValue]
-            c.setMarkedText(
-                NSAttributedString(string: text, attributes: attrs),
-                selectionRange: NSRange(location: text.utf16.count, length: 0),
-                replacementRange: range
-            )
             enterConverting(reading: entry.reading, candidates: restored.candidates, selected: restored.selected,
-                            previousRightID: entry.previousRightID, client: c)
+                            previousRightID: entry.previousRightID, replacementRange: range, client: c)
             return true
         case .deleteThenMark:
             // The client deletes the last character with its own Backspace;
@@ -822,14 +827,10 @@ final class VimeuInputController: IMKInputController, @unchecked Sendable {
             let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
                 self.pendingReconversion = nil
-                let attrs: [NSAttributedString.Key: Any] = [.underlineStyle: NSUnderlineStyle.single.rawValue]
-                c.setMarkedText(
-                    NSAttributedString(string: text, attributes: attrs),
-                    selectionRange: NSRange(location: text.utf16.count, length: 0),
-                    replacementRange: rest.length > 0 ? rest : NSRange(location: NSNotFound, length: 0)
-                )
+                let replace = rest.length > 0 ? rest : NSRange(location: NSNotFound, length: 0)
                 self.enterConverting(reading: entry.reading, candidates: restored.candidates,
-                                     selected: restored.selected, previousRightID: entry.previousRightID, client: c)
+                                     selected: restored.selected, previousRightID: entry.previousRightID,
+                                     replacementRange: replace, client: c)
             }
             pendingReconversion = work
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.reconversionDelay, execute: work)

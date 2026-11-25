@@ -117,6 +117,42 @@ public enum Collocation {
         )
     }
 
+    /// Pre-indexed negative pair matcher for the NBest hot path.
+    ///
+    /// Most candidates share zero or one surface with the negative table, so
+    /// filtering by the set of participating surfaces skips almost every path
+    /// in O(m) without allocating pairs.
+    struct NegativePairFilter: Sendable {
+        private let normalizedPairs: Set<CollocationKey>
+        private let surfaces: Set<String>
+
+        init(table: Set<CollocationKey>) {
+            var pairs = Set<CollocationKey>(minimumCapacity: table.count)
+            var words = Set<String>(minimumCapacity: table.count * 2)
+            for key in table {
+                pairs.insert(CollocationKey.unordered(key.left, key.right))
+                words.insert(key.left)
+                words.insert(key.right)
+            }
+            self.normalizedPairs = pairs
+            self.surfaces = words
+        }
+
+        func matches(surfaces candidateSurfaces: [String]) -> Bool {
+            guard !normalizedPairs.isEmpty else { return false }
+            var hit: [String] = []
+            for surface in candidateSurfaces where surfaces.contains(surface) {
+                for earlier in hit {
+                    if normalizedPairs.contains(CollocationKey.unordered(earlier, surface)) {
+                        return true
+                    }
+                }
+                hit.append(surface)
+            }
+            return false
+        }
+    }
+
     /// Negative relations are about simultaneous appearance, not a particular
     /// segmentation. Check every pair of surfaces in the completed candidate,
     /// including a passthrough node that may have inherited an unknown POS.
@@ -124,19 +160,7 @@ public enum Collocation {
         in surfaces: [String], table: Set<CollocationKey>
     ) -> Bool {
         guard !table.isEmpty else { return false }
-        for leftIndex in surfaces.indices {
-            for rightIndex in surfaces.indices where rightIndex > leftIndex {
-                let pair = CollocationKey(
-                    left: surfaces[leftIndex], right: surfaces[rightIndex]
-                )
-                if table.contains(pair) || table.contains(
-                    CollocationKey(left: pair.right, right: pair.left)
-                ) {
-                    return true
-                }
-            }
-        }
-        return false
+        return NegativePairFilter(table: table).matches(surfaces: surfaces)
     }
 
     /// Re-rank candidates by the registered pairs, cheapest first.

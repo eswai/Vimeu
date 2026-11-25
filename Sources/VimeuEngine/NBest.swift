@@ -49,6 +49,10 @@ public enum NBest {
         public var limit: Int
         /// Paths past `limit` are kept only while they cost no more than this.
         public var ceiling: Int32
+        /// Optional relative window above the first accepted path's cost. Used
+        /// when `acceptsPath` can reject the Viterbi winner so the ceiling is
+        /// only known once the first allowed path is popped.
+        public var window: Int32?
         /// Optional hard-path predicate. Rejected paths do not count toward
         /// `limit`, which lets a caller skip forbidden candidates and continue
         /// searching for the next valid surface.
@@ -56,10 +60,12 @@ public enum NBest {
 
         public init(
             limit: Int, ceiling: Int32,
+            window: Int32? = nil,
             acceptsPath: (@Sendable ([Int]) -> Bool)? = nil
         ) {
             self.limit = limit
             self.ceiling = ceiling
+            self.window = window
             self.acceptsPath = acceptsPath
         }
     }
@@ -101,6 +107,7 @@ public enum NBest {
         var expansions = 0
 
         let hardLimit = max(limit, extra?.limit ?? 0)
+        var effectiveCeiling = extra?.ceiling ?? Int32.max
 
         while expansions < maxExpansions, let elementIndex = queue.pop() {
             expansions += 1
@@ -110,7 +117,7 @@ public enum NBest {
             // Elements come off in increasing `f`, and `f` is the exact total of
             // the cheapest whole path through this element — so once one is past
             // the ceiling, every path still to come is too.
-            if let extra, paths.count >= limit, element.f > extra.ceiling { break }
+            if extra != nil, paths.count >= limit, element.f > effectiveCeiling { break }
 
             if node.begin == 0 {
                 // Reached BOS: the suffix is a whole sentence, and `f` is already
@@ -123,6 +130,10 @@ public enum NBest {
                     continue
                 }
                 if seen.insert(text).inserted {
+                    if paths.isEmpty, let window = extra?.window {
+                        let (sum, overflow) = element.f.addingReportingOverflow(window)
+                        effectiveCeiling = min(effectiveCeiling, overflow ? Int32.max : sum)
+                    }
                     paths.append(Path(nodes: nodes, cost: element.f))
                     if paths.count >= hardLimit { break }
                 }

@@ -35,7 +35,7 @@ public struct RomajiConverter {
     // Flush any pending state before conversion or insertion.
     // "n" alone → "ん"; other incomplete sequences returned as-is.
     public mutating func drain() -> String {
-        if pending == "n" || pending.hasSuffix("n") && pending.count == 1 {
+        if pending == "n" {
             pending = ""
             return "ん"
         }
@@ -160,7 +160,7 @@ public struct RomajiConverter {
         // Small kana (l prefix — alternate)
         ("la", "ぁ"), ("li", "ぃ"), ("lu", "ぅ"), ("le", "ぇ"), ("lo", "ぉ"),
         ("lya", "ゃ"), ("lyu", "ゅ"), ("lyo", "ょ"),
-        ("ltu", "っ"), ("ltsu", "っ"),
+        ("ltu", "っ"), ("ltsu", "っ"), ("lwa", "ゎ"),
     ]
     // swiftlint:enable line_length
 }

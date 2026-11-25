@@ -133,7 +133,7 @@ public final class DictionaryEditor: @unchecked Sendable {
         let key = WordKey(reading: reading, surface: surface)
         mutateWords { words, overlay in
             let current = overlay.effectiveCost(reading: reading, surface: surface)
-                ?? words[key]?.cost ?? 0
+                ?? words[key]?.cost ?? Lattice.unknownCost
             let next = UserDict.clampCost(current - Int32(steps) * UserDict.costStep)
             words[key] = WordEdit(
                 reading: reading, surface: surface,
@@ -255,14 +255,19 @@ public final class DictionaryEditor: @unchecked Sendable {
         collocations.filter { $0.polarity == .negative }
     }
 
-    /// The words the 共起 pane offers in its two menus: every content word in
-    /// any candidate, in the order they were first seen.
-    ///
-    /// Pooled across *all* candidates, not just the selected one — the whole
-    /// point of registering a pair is that the words are currently spread over
-    /// candidates that lost. For `かわをむく` the shipped dictionary puts `皮` in
-    /// the second candidate and `剥く` in the ninth, and a menu built from one
-    /// candidate could never offer both.
+    /// Whether `reading` can be indexed and matched as a user-added word in
+    /// the loaded dictionary (within `maxReadingLength` and using only
+    /// characters present in the dictionary's kana alphabet).
+    public func canIndexReading(_ reading: String) -> Bool {
+        let count = reading.unicodeScalars.count
+        guard count > 0, count <= DicFormat.maxReadingLength else { return false }
+        let codes = dictionary.encode(reading)
+        return codes.count == count && !codes.contains(0)
+    }
+
+    /// The content words found in `candidates`, in the order they were first
+    /// seen. Callers pass whichever scope they want to offer (for example, the
+    /// tuning window passes the currently selected candidate).
     public func collocationChoices(for candidates: [Candidate]) -> [String] {
         let overlay = dictionary
         var seen = Set<String>()
@@ -415,7 +420,7 @@ public final class DictionaryEditor: @unchecked Sendable {
         return WordKnob(
             reading: reading,
             surface: surface,
-            cost: edit?.cost ?? base ?? 0,
+            cost: edit?.cost ?? base ?? Lattice.unknownCost,
             baseCost: base,
             posNames: overlay.systemPOSIDs(reading: reading, surface: surface).map(overlay.posName),
             userOverride: edit?.cost != nil,

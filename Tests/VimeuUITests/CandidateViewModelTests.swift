@@ -36,6 +36,39 @@ final class CandidateViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testValidateNewWordChecksReadingSurfaceAndCost() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vimeu-ui-validate-\(UUID().uuidString)", isDirectory: true)
+        let dicPath = directory.appendingPathComponent("test.dic").path
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let writer = DicWriter()
+        try writer.setPOSTable(
+            names: ["BOS/EOS,*,*,*,*,*,*", "名詞,一般,*,*,*,*,*"],
+            connection: [0, 0, 0, 0],
+            prefixPenalty: [0, 0],
+            suffixPenalty: [0, 0],
+            unknownPOSID: 1
+        )
+        try writer.add(reading: "はし", surface: "橋", cost: 3000, lid: 1, rid: 1)
+        try writer.write(to: dicPath)
+
+        let model = AdjustmentViewModel()
+        model.editor = DictionaryEditor(
+            system: try DicReader(path: dicPath),
+            store: UserDictionaryStore(directory: directory)
+        )
+
+        XCTAssertNil(model.validateNewWord(reading: "はし", surface: "端", costText: "1000"))
+        XCTAssertNotNil(model.validateNewWord(reading: "", surface: "端", costText: "1000"))
+        XCTAssertNotNil(model.validateNewWord(reading: "はし", surface: "端\t", costText: "1000"))
+        XCTAssertNotNil(model.validateNewWord(reading: "ハシ", surface: "端", costText: "1000"))
+        XCTAssertNotNil(model.validateNewWord(reading: "はし", surface: "端", costText: "abc"))
+        XCTAssertNotNil(model.validateNewWord(reading: "はし", surface: "端", costText: "40000"))
+    }
+
+    @MainActor
     func testAdjustmentWordsUseCandidatesBeyondTheFormerNineItemLimit() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
